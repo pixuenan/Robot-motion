@@ -31,6 +31,11 @@ class Robot(object):
 
         self.max_time = 1000
         self.Q = dict()
+        self.trace_list = []
+        self.trace_back = False
+        self.trace_back_step = 0
+        self.move = 0
+        self.train_deadline = 5 * self.maze_dim / 2
 
     def update_location(self, movement):
         '''
@@ -74,41 +79,75 @@ class Robot(object):
         the tester to end the run and return the robot to the start.
         '''
         # select random direction in available directions
-        # in the first run
+
+        ####################################
+        # check if the robot is in a special location
+        ####################################
+        goal_bounds = [self.maze_dim/2 - 1, self.maze_dim/2]
+        # check for goal entered
+        if self.location in goal_bounds and self.location in goal_bounds:
+            self.trace_back = True
+
         # create a list to record all of the movements to trace back to the start position
         # empty this list when restart
+        # reset traceback after the robot back to the initial location
+        if self.location == [0, 0] and self.trace_back:
+            self.heading = 'up'
+            self.trace_back = False
+            self.trace_back_step = 0
+            self.trace_list = []
+            self.move = 0
 
-        # get distance to every direction wall
-        # collect possible heading and movement
-        dir_possible = dict()
-        if sum(sensors) != 0:
-            for idx, possible_heading in enumerate(dir_sensors[self.heading]):
-                wall_distance = sensors[idx]
-                # print "+++", possible_heading, wall_distance
-                if wall_distance != 0:
-                    dir_possible[possible_heading] = wall_distance
-        # dead end, move back 1 step
+        if not self.trace_back:
+            # get distance to every direction wall
+            # collect possible heading and movement
+            dir_possible = dict()
+            if sum(sensors) != 0:
+                for idx, possible_heading in enumerate(dir_sensors[self.heading]):
+                    wall_distance = sensors[idx]
+                    # print "+++", possible_heading, wall_distance
+                    if wall_distance != 0:
+                        dir_possible[possible_heading] = wall_distance
+            # dead end, move back 1 step
+            else:
+                dir_possible[dir_reverse[self.heading]] = 1
+
+            # random select heading and movement
+            if len(dir_possible.keys()) > 1:
+                heading = random.choice(dir_possible.keys())
+                movement = random.choice(range(1, min(dir_possible[heading], 3)+1))
+            else:
+                heading = dir_possible.keys()[0]
+                movement = min(dir_possible[heading], 3)
+
+            if dir_reverse[self.heading] == heading:
+                movement = -movement
+            if (self.heading, heading) in dir_rotation_heading[90]:
+                rotation = 90
+            elif (self.heading, heading) in dir_rotation_heading[-90]:
+                rotation = -90
+            else:
+                rotation = 0
+            self.trace_list += [(rotation, movement)]
+            self.move += 1
+
+        # traceback
         else:
-            dir_possible[dir_reverse[self.heading]] = 1
+            if self.trace_back_step == 0:
+                rotation = 0
+            else:
+                rotation = self.trace_list[-1 - self.trace_back_step][0]
+            movement = 0 - self.trace_list[-1][1]
+            self.trace_back_step += 1
+            # perform rotation
+            if rotation == -90:
+                heading = dir_sensors[self.heading][0]
+            elif rotation == 90:
+                heading = dir_sensors[self.heading][2]
+            else:
+                heading = self.heading
 
-        # random select heading and movement
-        if len(dir_possible.keys()) > 1:
-            heading = random.choice(dir_possible.keys())
-            movement = random.choice(range(1, min(dir_possible[heading], 3)+1))
-        else:
-            heading = dir_possible.keys()[0]
-            movement = min(dir_possible[heading], 3)
-
-        if dir_reverse[self.heading] == heading:
-            movement = -movement
-        if (self.heading, heading) in dir_rotation_heading[90]:
-            rotation = 90
-        elif (self.heading, heading) in dir_rotation_heading[-90]:
-            rotation = -90
-        else:
-            rotation = 0
-        print self.heading, heading, rotation, movement
-
+        # print self.heading, heading, rotation, movement
         # update location and heading
         if dir_reverse[self.heading] != heading:
             self.heading = heading
