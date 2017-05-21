@@ -32,13 +32,15 @@ class Robot(object):
         self.maze_dim = maze_dim
 
         self.max_time = 1000
+        self.dead_end = False
         self.Q = dict()
         self.trace_list = []
         self.trace_back = False
         self.trace_back_step = 0
         self.move = 0
         self.train_deadline = 5 * self.maze_dim / 2
-        logging.basicConfig(filename='test.log', level=logging.DEBUG)  ###
+        self.initial_location_pos_move = dict()
+        logging.basicConfig(filename='test.log', filemode='w', level=logging.DEBUG)  ###
 
     def build_Q_dict(self):
         '''
@@ -53,14 +55,17 @@ class Robot(object):
                         default_score[[direction, move]] = 0
                 self.Q_dict[[row, column]] = default_score
 
-    def update_location(self, movement):
+    def update_location(self, movement, heading):
         '''
-        Update robot location based on the movement and rotation
+        Update robot location based on the movement and heading chosen
         '''
 
         # perform movement
         self.pre_location = self.location
         self.pre_heading = self.heading
+        # keep heading when chose to step back, otherwise change heading
+        if dir_reverse[self.heading] != heading:
+            self.heading = heading
         if abs(movement) > 3:
             print "Movement limited to three squares in a turn."
         movement = max(min(int(movement), 3), -3) # fix to range [-3, 3]
@@ -95,21 +100,58 @@ class Robot(object):
             heading = self.heading
         return movement, heading
 
+
+    @staticmethod
+    def more_pos(sensors):
+        '''
+        Has more than one possible direction
+        :param sensors:
+        :return:
+        '''
+        pos_mov = 0
+        for pos in sensors:
+            if pos != 0:
+                pos_mov += 1
+        if pos_mov > 1:
+            return True
+        else:
+            return False
+
     def next_pos_move(self, sensors):
         '''
         Use this function to determine the possible next move
         :return:
         '''
         dir_possible = dict()
-        if sum(sensors) != 0:
-            for idx, possible_heading in enumerate(dir_sensors[self.heading]):
-                wall_distance = sensors[idx]
-                logging.info("+++pos h:" + possible_heading + ":wal d:" + str(wall_distance))
-                if wall_distance != 0:
-                    dir_possible[possible_heading] = wall_distance
-        # dead end, move back 1 step
+        # not dead end
+        if not self.dead_end:
+            # has possible movement
+            if sum(sensors) != 0:
+                for idx, possible_heading in enumerate(dir_sensors[self.heading]):
+                    wall_distance = sensors[idx]
+                    if wall_distance != 0:
+                        logging.info("+++pos h:" + possible_heading + "|||wal d:" + str(wall_distance))
+                        dir_possible[possible_heading] = wall_distance
+            # no possible movement, dead end
+            elif sum(sensors) == 0:
+                self.dead_end = True
+                dir_possible[self.heading] = 0 - self.trace_list[-1][1]
+                del self.trace_list[-1]
+        # dead end
         else:
-            dir_possible[dir_reverse[self.heading]] = 1
+            # has more than one possible movement
+            if self.more_pos(sensors):
+                self.dead_end = False
+                for idx, possible_heading in enumerate(dir_sensors[self.heading]):
+                    wall_distance = sensors[idx]
+                    if wall_distance != 0:
+                        logging.info("+++pos h:" + possible_heading + "|||wal d:" + str(wall_distance))
+                        dir_possible[possible_heading] = wall_distance
+            else:
+                logging.info("keep step back" + str(self.trace_list[-1]))
+                dir_possible[self.heading] = 0 - self.trace_list[-1][1]
+                del self.trace_list[-1]
+
         return dir_possible
 
     @staticmethod
@@ -171,18 +213,17 @@ class Robot(object):
         the maze) then returing the tuple ('Reset', 'Reset') will indicate to
         the tester to end the run and return the robot to the start.
         '''
-        # select random direction in available directions
 
         ####################################
         # check if the robot is in a special location
         ####################################
         goal_bounds = [self.maze_dim/2 - 1, self.maze_dim/2]
         # check for goal entered
-        if self.location[0] in goal_bounds and self.location[1] in goal_bounds or self.move > self.train_deadline:
+        # if self.location[0] in goal_bounds and self.location[1] in goal_bounds or self.move > self.train_deadline:
+        logging.info("cur loc" + str(self.location))
+        if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
             self.trace_back = True
 
-        # create a list to record all of the movements to trace back to the start position
-        # empty this list when restart
         # reset traceback after the robot back to the initial location
         if self.location == [0, 0] and self.trace_back:
             self.reset_traceback()
@@ -196,21 +237,19 @@ class Robot(object):
             if random_m:
                 heading, movement = self.random_move(dir_possible)
 
-            self.heading = heading
             # set movement and rotation
             movement, rotation = self.decide_move_n_rotation(heading, movement)
-            self.trace_list += [(rotation, movement)]
             self.move += 1
+            if not self.dead_end:
+                self.trace_list += [(rotation, movement)]
 
         # traceback
         else:
             movement, heading = self.traceback_move()
+            movement, rotation = self.decide_move_n_rotation(heading, movement)
 
-        # print self.heading, heading, rotation, movement
         # update location and heading
-        if dir_reverse[self.heading] != heading:
-            self.heading = heading
-        self.update_location(movement)
-        logging.info(self.location)  ###
+        self.update_location(movement, heading)
+        logging.info("next loc" + str(self.location) + "end step")  ###
 
         return rotation, movement
