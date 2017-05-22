@@ -36,7 +36,8 @@ class Robot(object):
         self.Q = dict()
         self.trace_list = []
         self.trace_back = False
-        self.trace_back_step = 0
+        self.rotate = False
+        self.trace_back_step = 1
         self.move = 0
         self.train_deadline = 5 * self.maze_dim / 2
         self.initial_location_pos_move = dict()
@@ -85,11 +86,11 @@ class Robot(object):
         Traceback to the initial location after enter the goal zone.
         :return:
         '''
-        if self.trace_back_step == 0:
+        if self.trace_back_step == 1:
             rotation = 0
         else:
-            rotation = self.trace_list[-1 - self.trace_back_step][0]
-        movement = 0 - self.trace_list[-1][1]
+            rotation = 0 - self.trace_list[1 - self.trace_back_step][0]
+        movement = 0 - self.trace_list[-self.trace_back_step][1]
         self.trace_back_step += 1
         # perform rotation
         if rotation == -90:
@@ -98,6 +99,7 @@ class Robot(object):
             heading = dir_sensors[self.heading][2]
         else:
             heading = self.heading
+        logging.info("TRACE STEP" + str(self.trace_back_step))
         return movement, heading
 
 
@@ -186,11 +188,9 @@ class Robot(object):
         Reset variables after traceback
         :return:
         '''
-        self.heading = 'up'
         self.trace_back = False
-        self.trace_back_step = 0
+        self.trace_back_step = 1
         self.trace_list = []
-        self.move = 0
 
     def next_move(self, sensors):
         '''
@@ -219,37 +219,59 @@ class Robot(object):
         ####################################
         goal_bounds = [self.maze_dim/2 - 1, self.maze_dim/2]
         # check for goal entered
-        # if self.location[0] in goal_bounds and self.location[1] in goal_bounds or self.move > self.train_deadline:
-        logging.info("cur loc" + str(self.location))
+        logging.info("cur loc " + str(self.location) + ",head " + str(self.heading) + ",track back " + str(self.trace_back))
         if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
+        # if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
+            logging.info("GOAL")
+            print "GOAL"
+            self.trace_back = True
+        if self.move > self.train_deadline:
+            logging.info("DEADLINE")
+            print "DEADLINE"
             self.trace_back = True
 
         # reset traceback after the robot back to the initial location
-        if self.location == [0, 0] and self.trace_back:
+        if self.location == [0, 0] and self.move > 0:
+
+            if "u" not in self.heading:
+                self.rotate = True
+                movement = 0
+                if "d" in self.heading:
+                    heading = 'l'
+                elif "r" in self.heading or "l" in self.heading:
+                    heading = 'u'
+                movement, rotation = self.decide_move_n_rotation(heading, movement)
+                self.move += 1
+
+            else:
+                self.rotate = False
+                self.move = 0
             self.reset_traceback()
 
-        if not self.trace_back:
-            # get distance to every direction wall
-            # collect possible heading and movement
-            dir_possible = self.next_pos_move(sensors)
-            # random select heading and movement
-            random_m = True
-            if random_m:
-                heading, movement = self.random_move(dir_possible)
+        if not self.rotate:
+            if not self.trace_back:
+                # get distance to every direction wall
+                # collect possible heading and movement
+                dir_possible = self.next_pos_move(sensors)
+                # random select heading and movement
+                random_m = True
+                if random_m:
+                    heading, movement = self.random_move(dir_possible)
 
-            # set movement and rotation
-            movement, rotation = self.decide_move_n_rotation(heading, movement)
-            self.move += 1
-            if not self.dead_end:
-                self.trace_list += [(rotation, movement)]
+                # set movement and rotation
+                movement, rotation = self.decide_move_n_rotation(heading, movement)
+                if not self.dead_end:
+                    self.trace_list += [(rotation, movement)]
+                self.move += 1
 
-        # traceback
-        else:
-            movement, heading = self.traceback_move()
-            movement, rotation = self.decide_move_n_rotation(heading, movement)
+            # traceback
+            else:
+                movement, heading = self.traceback_move()
+                movement, rotation = self.decide_move_n_rotation(heading, movement)
 
         # update location and heading
         self.update_location(movement, heading)
-        logging.info("next loc" + str(self.location) + "end step")  ###
+        logging.info(str(self.move) + "next loc" + str(self.location) + "end step")  ###
+        logging.info(str(self.trace_list))
 
         return rotation, movement
