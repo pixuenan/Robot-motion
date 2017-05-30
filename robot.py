@@ -108,7 +108,7 @@ class Robot(TraceBack):
         self.Q = dict()
         self.rotate = False
         self.move = 0
-        self.train_deadline = 5 * self.maze_dim / 2
+        self.train_deadline = 7 * self.maze_dim / 2
         self.initial_location_pos_move = dict()
         logging.basicConfig(filename='test.log', filemode='w', level=logging.DEBUG)  ###
 
@@ -241,7 +241,6 @@ class Robot(TraceBack):
         rest_step = self.train_deadline - self.move
 
         # check for goal entered
-        logging.info("cur loc " + str(self.location) + ",head " + str(self.heading) + ",track back " + str(self.trace_back))
         if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
         # if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
             logging.info("GOAL")
@@ -249,29 +248,31 @@ class Robot(TraceBack):
             self.trace_back = True
             self.move = 0
 
-        if self.move > self.train_deadline:
+        if self.move >= self.train_deadline:
             logging.info("DEADLINE")
             print "DEADLINE"
             self.trace_back = True
             self.move = 0
+        logging.info("cur loc " + str(self.location) + ",head " + str(self.heading) + ",trace back " + str(self.trace_back))
+        logging.info("move " + str(self.move))
 
         # rotate the robot to the original direction after traceback
         if self.location == [0, 0]:
-            if self.move > 0:
 
-                if "u" not in self.heading:
-                    self.rotate = True
-                    movement = 0
-                    if "d" in self.heading:
-                        heading = 'l'
-                    elif "r" in self.heading or "l" in self.heading:
-                        heading = 'u'
-                    movement, rotation = self.decide_move_n_rotation(heading, movement)
-                    self.move += 1
+            if "u" not in self.heading:
+                logging.info("ROTATING")
+                self.rotate = True
+                movement = 0
+                if "d" in self.heading:
+                    heading = 'l'
+                elif "r" in self.heading or "l" in self.heading:
+                    heading = 'u'
+                movement, rotation = self.decide_move_n_rotation(heading, movement)
+                self.move += 1
 
-                else:
-                    self.rotate = False
-                    self.move = 0
+            else:
+                self.rotate = False
+                self.move = 0
             self.reset_traceback()
 
         if not self.rotate:
@@ -307,7 +308,7 @@ class Robot(TraceBack):
 
         # update location and heading
         self.update_location(movement, heading)
-        logging.info(str(self.move) + "next loc" + str(self.location) + "end step")  ###
+        logging.info("next loc" + str(self.location) + "end step")  ###
         logging.info(str(self.trace_list))
 
         return rotation, movement
