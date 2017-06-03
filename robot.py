@@ -1,4 +1,5 @@
 import numpy as np
+import math
 import random
 import logging
 
@@ -91,7 +92,31 @@ class TraceBack(object):
         self.trace_back_step = 1
         self.trace_list = []
 
-class Robot(TraceBack):
+
+class Score(object):
+    def __init__(self):
+        self.reward = 0
+        self.penalty = 0
+
+    def deadline_penalty(self, deadline, move):
+        fnc = move * 1.0 / (move + deadline)
+        # print "fnc", fnc
+        gradient = 10
+        self.penalty = (math.pow(gradient, fnc) - 1) / (gradient - 1)
+        # print "penalty", self.penalty
+
+    def get_score(self, deadline, move, dead_end=False, repeat=False):
+        self.reward = 2 * random.random() - 1
+        if dead_end:
+            self.reward -= 10
+        elif repeat:
+            self.reward -= 5
+        self.deadline_penalty(deadline, move)
+        self.reward += 2 - self.penalty
+        return self.reward
+
+
+class Robot(TraceBack, Score):
     def __init__(self, maze_dim):
         '''
         Use the initialization function to set up attributes that your robot
@@ -100,30 +125,33 @@ class Robot(TraceBack):
         the robot is placed in.
         '''
         TraceBack.__init__(self)
+        Score.__init__(self)
         self.location = [0, 0]
         self.heading = 'up'
         self.maze_dim = maze_dim
+        self.alpha = 0.8
 
         self.max_time = 1000
-        self.Q = dict()
+        self.Q_dict = dict()
         self.rotate = False
         self.move = 0
         self.train_deadline = 7 * self.maze_dim / 2
         self.initial_location_pos_move = dict()
         logging.basicConfig(filename='test.log', filemode='w', level=logging.DEBUG)  ###
+        self.build_Q_dict()
 
     def build_Q_dict(self):
         '''
         Build the dictionary of the score for every location in the maze in terms of next movement and heading
         :return: {[row, column]: {[next_heading, next_movement]: score}}
         '''
+        default_score = dict()
+        for direction in ['u', 'l', 'r', 'd']:
+            for move in [-3, -2, -1, 1, 2, 3]:
+                default_score[(direction, move)] = 0
         for row in range(self.maze_dim):
             for column in range(self.maze_dim):
-                default_score = dict()
-                for direction in ['u', 'l', 'r', 'd']:
-                    for move in [-3, -2, -1, 1, 2, 3]:
-                        default_score[[direction, move]] = 0
-                self.Q_dict[[row, column]] = default_score
+                self.Q_dict[(row, column)] = default_score.copy()
 
     def update_location(self, movement, heading):
         '''
@@ -147,6 +175,25 @@ class Robot(TraceBack):
                 self.location[0] += dir_move[rev_heading][0]
                 self.location[1] += dir_move[rev_heading][1]
                 movement += 1
+
+    def update_Q_dict(self, dead_end=False, repeat=False):
+        '''
+        Update Q dictionary for the previous action
+        :return:
+        '''
+        location = tuple(self.trace_list[-1][0])
+        action = tuple(self.trace_list[-1][-2:])
+        if dead_end:
+            reward = self.get_score(self.train_deadline, self.move-1, dead_end=True, repeat=False)
+        elif repeat:
+            reward = self.get_score(self.train_deadline, self.move-1, dead_end=False, repeat=True)
+        else:
+            reward = self.get_score(self.train_deadline, self.move-1, dead_end, repeat)
+        original_Qvaule = self.Q_dict[location][action]
+        # print '---', location, action, original_Qvaule, reward
+        Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
+        # print '+++', Qvalue
+        self.Q_dict[location][action] = Qvalue
 
     @staticmethod
     def more_pos(sensors):
@@ -284,6 +331,7 @@ class Robot(TraceBack):
             else:
                 if sum(sensors) == 0:
                     self.dead_end = True
+                    self.update_Q_dict(dead_end=True)
 
                 if self.dead_end:
                     rotation, movement = self.dead_end_trace_back(rest_step)
@@ -293,6 +341,12 @@ class Robot(TraceBack):
                 # start dead end trace back
 
                 else:
+                    if self.location != [0, 0]:
+                        pre_location_list = zip(*self.trace_list)[0]
+                        if self.location in pre_location_list:
+                            self.update_Q_dict(repeat=True)
+                        else:
+                            self.update_Q_dict()
                     # collect possible heading and movement
                     dir_possible = self.next_pos_move(sensors)
                     # random select heading and movement
