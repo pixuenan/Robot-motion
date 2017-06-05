@@ -139,7 +139,6 @@ class Robot(TraceBack, Score):
         self.rotate = False
         self.move = 0
         self.train_deadline = 30 * self.maze_dim / 2
-        self.train = self.max_time/(self.train_deadline*2*1.5)
         self.initial_location_pos_move = dict()
         logging.basicConfig(filename='test.log', filemode='w', level=logging.DEBUG)  ###
         self.build_Q_dict()
@@ -181,7 +180,7 @@ class Robot(TraceBack, Score):
                 self.location[1] += dir_move[rev_heading][1]
                 movement += 1
 
-    def update_Q_dict(self, dead_end=False, repeat=False):
+    def update_Q_dict(self, dead_end=False, repeat=False, goal=False):
         '''
         Update Q dictionary for the previous action
         :return:
@@ -197,12 +196,15 @@ class Robot(TraceBack, Score):
         goal_dist = abs(self.location[0]-((self.maze_dim-1)/2)) + abs(self.location[1]-((self.maze_dim-1)/2))
         dist_reward = self.maze_dim - goal_dist
         reward += dist_reward
+        if goal:
+            reward += 30
         # if self.closer(self.location, location):
         #     reward += 10
         original_Qvaule = self.Q_dict[location][action]
         # print '---', location, action, original_Qvaule, reward
         max_cur_Qvalue = max(self.Q_dict[tuple(self.location)].copy().values())
-        Qvalue = original_Qvaule + self.alpha * (reward + max_cur_Qvalue - original_Qvaule)
+        Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
+        # Qvalue = original_Qvaule + self.alpha * (reward + max_cur_Qvalue - original_Qvaule)
         # print '+++', Qvalue
         self.Q_dict[location][action] = Qvalue
 
@@ -332,10 +334,12 @@ class Robot(TraceBack, Score):
         # if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
             logging.info("GOAL")
             print "GOAL"
+            print self.step
             self.trace_back = True
             self.test += 1
             print "Test %d" % self.test
             self.move = 0
+            self.update_Q_dict(goal=True)
         #
         if self.move >= self.train_deadline:
             logging.info("DEADLINE")
