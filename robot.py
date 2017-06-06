@@ -149,44 +149,50 @@ class Robot(TraceBack, Score):
         Build the dictionary of the score for every location in the maze in terms of next movement and heading
         :return: {[row, column]: {[next_heading, next_movement]: score}}
         '''
-        default_score = dict()
-        for heading in ['u', 'l', 'r', 'd']:
-            for move in [1, 2, 3]:
-                default_score[(heading, move)] = 0
         for row in range(self.maze_dim):
             for column in range(self.maze_dim):
+                default_score = dict()
+                for heading in ['u', 'l', 'r', 'd']:
+                    for move in [1, 2, 3]:
+                        next_loc = self.update_location(dir_sensors[heading][0], [row, column], move, heading)[1]
+                        goal_dist = abs(next_loc[0]-((self.maze_dim-1)/2)) + abs(next_loc[1]-((self.maze_dim-1)/2))
+                        dist_reward = self.maze_dim - goal_dist
+                        default_score[(heading, move)] = dist_reward
                 self.Q_dict[(row, column)] = default_score.copy()
 
-    def update_location(self, movement, heading):
+    @staticmethod
+    def update_location(cur_heading, cur_location, movement, heading):
         '''
         Update robot location based on the movement and heading chosen
         '''
 
         # perform movement
         # keep heading when chose to step back, otherwise change heading
-        if dir_reverse[self.heading] != heading:
-            self.heading = heading
+        if dir_reverse[cur_heading] != heading:
+            cur_heading = heading
         if abs(movement) > 3:
             print "Movement limited to three squares in a turn."
         movement = max(min(int(movement), 3), -3) # fix to range [-3, 3]
         while movement:
             if movement > 0:
-                self.location[0] += dir_move[self.heading][0]
-                self.location[1] += dir_move[self.heading][1]
+                cur_location[0] += dir_move[cur_heading][0]
+                cur_location[1] += dir_move[cur_heading][1]
                 movement -= 1
             else:
-                rev_heading = dir_reverse[self.heading]
-                self.location[0] += dir_move[rev_heading][0]
-                self.location[1] += dir_move[rev_heading][1]
+                rev_heading = dir_reverse[cur_heading]
+                cur_location[0] += dir_move[rev_heading][0]
+                cur_location[1] += dir_move[rev_heading][1]
                 movement += 1
+        return cur_heading, cur_location
 
-    def update_Q_dict(self, dead_end=False, repeat=False, goal=False):
+    def update_Q_dict(self, dir_possible, dead_end=False, repeat=False, goal=False):
         '''
         Update Q dictionary for the previous action
         :return:
         '''
+        self.remove_action(dir_possible)
         location = tuple(self.trace_list[-1][0])
-        action = tuple(self.trace_list[-1][-2:])
+        action = tuple([self.trace_list[-1][-2], abs(self.trace_list[-1][-1])])
         if dead_end:
             reward = self.get_score(self.train_deadline, self.move-1, dead_end=True, repeat=False)
         elif repeat:
@@ -201,12 +207,22 @@ class Robot(TraceBack, Score):
         # if self.closer(self.location, location):
         #     reward += 10
         original_Qvaule = self.Q_dict[location][action]
-        # print '---', location, action, original_Qvaule, reward
-        max_cur_Qvalue = max(self.Q_dict[tuple(self.location)].copy().values())
-        Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
-        # Qvalue = original_Qvaule + self.alpha * (reward + max_cur_Qvalue - original_Qvaule)
+        max_cur_Qvalue = self.Q_dict[tuple(self.location)].copy().values() and max(self.Q_dict[tuple(self.location)].copy().values()) or 0
+        # Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
+        Qvalue = original_Qvaule + self.alpha * (reward + 0.5 * max_cur_Qvalue - original_Qvaule)
         # print '+++', Qvalue
         self.Q_dict[location][action] = Qvalue
+
+    def remove_action(self, dir_possible):
+        '''
+        Remove actions that is possible in the Q_dict
+        :return:
+        '''
+        action_dict = self.Q_dict[tuple(self.location)]#.copy()
+        for key, value in action_dict.items():
+            if key[0] != dir_reverse[self.heading]:
+                if key[0] not in dir_possible.keys() or key[1] > dir_possible[key[0]]:
+                    del self.Q_dict[tuple(self.location)][key]
 
     @staticmethod
     def more_pos(sensors):
@@ -287,11 +303,10 @@ class Robot(TraceBack, Score):
 
     def act(self, dir_possible):
         action_dict = self.Q_dict[tuple(self.location)].copy()
-        max_Q_action = []
         for key, value in action_dict.items():
             if key[0] not in dir_possible.keys() or key[1] > dir_possible[key[0]]:
-                # print dir_possible.keys()
                 del action_dict[key]
+        max_Q_action = []
         max_Q_value = max(action_dict.values())
         logging.info("action+ " + str(action_dict))
         for key, value in action_dict.items():
@@ -326,6 +341,7 @@ class Robot(TraceBack, Score):
         # check if the robot is in a special location
         ####################################
         self.epsilon = 0.5*math.cos(math.pi*self.step/4000)
+        dir_possible = self.next_pos_move(sensors)
 
         goal_bounds = [self.maze_dim/2 - 1, self.maze_dim/2]
         rest_step = self.train_deadline - self.move
@@ -339,7 +355,7 @@ class Robot(TraceBack, Score):
             self.test += 1
             print "Test %d" % self.test
             self.move = 0
-            self.update_Q_dict(goal=True)
+            self.update_Q_dict(dir_possible, goal=True)
         #
         if self.move >= self.train_deadline:
             logging.info("DEADLINE")
@@ -380,7 +396,7 @@ class Robot(TraceBack, Score):
                 # print '---', self.location
                 if sum(sensors) == 0:
                     self.dead_end = True
-                    self.update_Q_dict(dead_end=True)
+                    self.update_Q_dict(dir_possible, dead_end=True)
 
                 if self.dead_end:
                     rotation, movement = self.dead_end_trace_back(rest_step)
@@ -393,12 +409,14 @@ class Robot(TraceBack, Score):
                     if self.location != [0, 0]:
                         pre_location_list = zip(*self.trace_list)[0]
                         if self.location in pre_location_list:
-                            self.update_Q_dict(repeat=True)
+                            self.update_Q_dict(dir_possible, repeat=True)
                         else:
-                            self.update_Q_dict()
+                            self.update_Q_dict(dir_possible)
+                    else:
+                        self.remove_action(dir_possible)
+
                     # collect possible heading and movement
                     logging.info(sensors)
-                    dir_possible = self.next_pos_move(sensors)
                     # random select heading and movement
                     # print self.test, self.train
                     if self.epsilon > random.random():
@@ -413,7 +431,7 @@ class Robot(TraceBack, Score):
                 self.move += 1
 
         # update location and heading
-        self.update_location(movement, heading)
+        self.heading, self.location = self.update_location(self.heading, self.location, movement, heading)
         logging.info("next loc" + str(self.location) + "end step")  ###
         logging.info(str(self.trace_list))
         self.step += 1
