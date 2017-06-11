@@ -123,12 +123,14 @@ class Robot(TraceBack, Score):
         self.location = [0, 0]
         self.heading = 'up'
         self.maze_dim = maze_dim
+        self.goal_loc = [[self.maze_dim/2-1, self.maze_dim/2-1],
+                         [self.maze_dim/2, self.maze_dim/2-1],
+                         [self.maze_dim/2-1, self.maze_dim/2],
+                         [self.maze_dim/2, self.maze_dim/2]]
         self.alpha = 0.8
         self.test = 0
         self.step = 0
         self.epsilon = 0.5
-
-        self.dead_end_list = []
 
         self.max_time = 1000
         self.Q_dict = dict()
@@ -246,7 +248,7 @@ class Robot(TraceBack, Score):
             wall_distance = sensors[idx]
             if wall_distance != 0:
                 logging.info("+++pos h:" + possible_heading + "|||wal d:" + str(wall_distance))
-                dir_possible[possible_heading] = wall_distance
+                dir_possible[possible_heading] = min(wall_distance, 3)
         return dir_possible
 
     @staticmethod
@@ -319,22 +321,35 @@ class Robot(TraceBack, Score):
         :param dir_possible:
         :return:
         '''
-        if len(dir_possible) > 1:
+        if len(dir_possible) > 1 or dir_possible.values()[0] > 1:
+            print dir_possible
             next_loc_dict = dict()
             # record dead end location
             # get all the next loactions from dir_possible
+            # only the movement not in the pre_location_list, dead_end_location_list will be included
             for heading, movement in dir_possible.items():
-                next_loc = self.update_location(dir_sensors[heading][0], self.location, movement, heading)[1]
-                goal_dist = abs(next_loc[0]-((self.maze_dim-1)/2)) + abs(next_loc[1]-((self.maze_dim-1)/2))
-                if not next_loc in self.dead_end_list + pre_location_list:
-                    next_loc_dict[(heading, movement)] = [next_loc, goal_dist]
-            if next_loc_dict:
-            # if goal zone is in the next locations, choose that action
+                for i in range(1, movement+1):
+                    next_loc = self.update_location(dir_sensors[heading][0], self.location, movement, heading)[1]
+                    # if goal zone is in the next locations, choose that action
+                    if next_loc in self.goal_loc:
+                        print "***Goal"
+                        return heading, movement
+                    goal_dist = abs(next_loc[0]-((self.maze_dim-1)/2)) + abs(next_loc[1]-((self.maze_dim-1)/2))
+                    if not next_loc in pre_location_list:
+                        next_loc_dict[(heading, movement)] = [next_loc, goal_dist]
             # elif choose the movement not in the pre_location_list, dead_end_location_list and closer to the goal_zone
+            if next_loc_dict:
+                min_dist = min(zip(*next_loc_dict.values())[1])
+                for action, result in next_loc_dict.items():
+                    if result[1] == min_dist:
+                        print "***Closet", action
+                        return action
             else:
-            # else random choose one action
+                # else random choose one action
+                print "***Random"
                 return self.random_move(dir_possible)
         else:
+            print "***Only option"
             return dir_possible.items()[0]
 
     def next_move(self, sensors):
@@ -363,12 +378,12 @@ class Robot(TraceBack, Score):
         # check if the robot is in a special location
         ####################################
         # self.epsilon = 0.5*math.cos(math.pi*self.step/4000)
+        print "###", self.location
         dir_possible = self.next_pos_move(sensors)
 
-        goal_bounds = [self.maze_dim/2 - 1, self.maze_dim/2]
         # rest_step = self.train_deadline - self.move
         # check for goal entered
-        if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
+        if self.location in self.goal_loc:
         # if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
             logging.info("GOAL")
             print "GOAL"
@@ -418,7 +433,6 @@ class Robot(TraceBack, Score):
                 # print '---', self.location
                 if sum(sensors) == 0:
                     self.dead_end = True
-                    self.dead_end_list += [self.location]
                     self.update_Q_dict(dir_possible, dead_end=True)
 
                 if self.dead_end:
@@ -450,8 +464,8 @@ class Robot(TraceBack, Score):
                         # heading, movement = self.act(dir_possible)
                     # set movement and rotation
                     # decide heading and movement when force the robot to enter the goal zone
-                    # choose the movement and rotation that the next location is not be visited yet
-                    # check if the possible next location is in the pre_location_list
+                    heading, movement = self.into_goal(pre_location_list, dir_possible)
+                    print "++++++", heading, movement
                     movement, rotation = self.decide_move_n_rotation(heading, movement)
                     cur_location = self.location[:]
                     self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
