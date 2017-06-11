@@ -215,7 +215,7 @@ class Robot(TraceBack, Score):
 
     def remove_action(self, dir_possible):
         '''
-        Remove actions that is possible in the Q_dict
+        Remove actions that is impossible in the Q_dict
         :return:
         '''
         action_dict = self.Q_dict[tuple(self.location)]#.copy()
