@@ -132,6 +132,8 @@ class Robot(TraceBack, Score):
         self.step = 0
         self.epsilon = 0.5
 
+        self.dead_end_list = []
+
         self.max_time = 1000
         self.Q_dict = dict()
         self.rotate = False
@@ -213,7 +215,7 @@ class Robot(TraceBack, Score):
 
     def remove_action(self, dir_possible):
         '''
-        Remove actions that is possible in the Q_dict
+        Remove actions that is impossible in the Q_dict
         :return:
         '''
         action_dict = self.Q_dict[tuple(self.location)]#.copy()
@@ -321,36 +323,46 @@ class Robot(TraceBack, Score):
         :param dir_possible:
         :return:
         '''
-        if len(dir_possible) > 1 or dir_possible.values()[0] > 1:
-            print dir_possible
-            next_loc_dict = dict()
-            # record dead end location
-            # get all the next loactions from dir_possible
-            # only the movement not in the pre_location_list, dead_end_location_list will be included
-            for heading, movement in dir_possible.items():
-                for i in range(1, movement+1):
-                    next_loc = self.update_location(dir_sensors[heading][0], self.location, movement, heading)[1]
-                    # if goal zone is in the next locations, choose that action
-                    if next_loc in self.goal_loc:
-                        print "***Goal"
-                        return heading, movement
-                    goal_dist = abs(next_loc[0]-((self.maze_dim-1)/2)) + abs(next_loc[1]-((self.maze_dim-1)/2))
-                    if not next_loc in pre_location_list:
-                        next_loc_dict[(heading, movement)] = [next_loc, goal_dist]
-            # elif choose the movement not in the pre_location_list, dead_end_location_list and closer to the goal_zone
-            if next_loc_dict:
-                min_dist = min(zip(*next_loc_dict.values())[1])
-                for action, result in next_loc_dict.items():
-                    if result[1] == min_dist:
-                        print "***Closet", action
-                        return action
-            else:
-                # else random choose one action
-                print "***Random"
-                return self.random_move(dir_possible)
-        else:
-            print "***Only option"
+        print dir_possible
+        next_loc_dict = dict()
+        result_dict = dict()
+        # record dead end location
+        # get all the next loactions from dir_possible
+        # only the movement not in the pre_location_list, dead_end_location_list will be included
+        for heading, movement in dir_possible.items():
+            for poss_move in range(1, movement+1):
+                location = self.location[:]
+                next_loc = self.update_location(self.heading, location, poss_move, heading)[1]
+                # if goal zone is in the next locations, choose that action
+                if next_loc in self.goal_loc:
+                    return heading, movement
+                # goal_dist = abs(next_loc[0]-((self.maze_dim-1)/2)) + abs(next_loc[1]-((self.maze_dim-1)/2))
+                print ":::::::::", next_loc
+                next_loc_dict[(heading, poss_move)] = next_loc
+
+        if len(next_loc_dict) == 1:
+            location = self.location[:]
+            print "Only", location
+            next_loc = self.update_location(self.heading, location, dir_possible.values()[0], dir_possible.keys()[0])[1]
+            if next_loc in self.dead_end_list:
+                print "aaaaa", location
+                self.dead_end_list += [self.location[:]]
             return dir_possible.items()[0]
+        else:
+            for (heading, poss_move), next_loc in next_loc_dict.items():
+                if next_loc in self.dead_end_list:
+                    del next_loc_dict[(heading, poss_move)]
+                    print "*", next_loc, self.dead_end_list
+            if next_loc_dict:
+                for (heading, poss_move), next_loc in next_loc_dict.items():
+                    if next_loc not in pre_location_list:
+                        result_dict[heading] = poss_move
+                if result_dict:
+                    return self.random_move(result_dict)
+                else:
+                    return self.random_move({heading: movement for (heading, movement) in next_loc_dict.keys()})
+            else:
+                return self.random_move(dir_possible)
 
     def next_move(self, sensors):
         '''
@@ -378,7 +390,9 @@ class Robot(TraceBack, Score):
         # check if the robot is in a special location
         ####################################
         # self.epsilon = 0.5*math.cos(math.pi*self.step/4000)
-        print "###", self.location
+        if self.step > 500:
+            return "Reset", "Reset"
+        print "###", self.location, self.step
         dir_possible = self.next_pos_move(sensors)
 
         # rest_step = self.train_deadline - self.move
@@ -393,6 +407,7 @@ class Robot(TraceBack, Score):
             print "Test %d" % self.test
             self.move = 0
             self.update_Q_dict(dir_possible, goal=True)
+            return "Reset", "Reset"
         #
         # if self.move >= self.train_deadline:
         #     logging.info("DEADLINE")
@@ -421,7 +436,7 @@ class Robot(TraceBack, Score):
             else:
                 self.rotate = False
                 self.move = 0
-            self.reset_traceback()
+            # self.reset_traceback()
         #
         if not self.rotate:
             # if self.trace_back:
@@ -430,46 +445,51 @@ class Robot(TraceBack, Score):
             #     logging.info("TRACE STEP: %d, %d, %d" % (self.trace_back_step - 1, rotation, movement))
         #
             # else:
-                # print '---', self.location
-                if sum(sensors) == 0:
-                    self.dead_end = True
-                    self.update_Q_dict(dir_possible, dead_end=True)
+            # print '---', self.location
+            if sensors.count(0) == 3:
+                self.dead_end = True
+                self.dead_end_list += [self.location[:]]
+                print "bbbbb", self.location
+                self.update_Q_dict(dir_possible, dead_end=True)
 
-                if self.dead_end:
-                    rotation, movement = self.dead_end_trace_back()
-                    heading = self.rotation_to_heading(rotation)
-                    logging.info("DEAD END TRACE STEP: %d" % self.dead_end_back_step)
-                    logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
-                # start dead end trace back
+            if self.dead_end:
+                if sum(sensors) == 1:
+                    self.dead_end_list += [self.location[:]]
+                    print "ccccc", self.location
 
-                else:
-                    pre_location_list = []
-                    if self.location != [0, 0]:
-                        pre_location_list = zip(*self.trace_list)[0]
-                        if self.location in pre_location_list:
-                            self.update_Q_dict(dir_possible, repeat=True)
-                        else:
-                            self.update_Q_dict(dir_possible)
+                rotation, movement = self.dead_end_trace_back()
+                heading = self.rotation_to_heading(rotation)
+                logging.info("DEAD END TRACE STEP: %d" % self.dead_end_back_step)
+                logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
+            # start dead end trace back
+
+            else:
+                pre_location_list = []
+                if self.location != [0, 0]:
+                    pre_location_list = list(zip(*self.trace_list)[0])
+                    if self.location in pre_location_list:
+                        self.update_Q_dict(dir_possible, repeat=True)
                     else:
-                        self.remove_action(dir_possible)
+                        self.update_Q_dict(dir_possible)
+                else:
+                    self.remove_action(dir_possible)
 
-                    # collect possible heading and movement
-                    logging.info(sensors)
-                    # random select heading and movement
-                    # print self.test, self.train
-                    # if self.epsilon > random.random():
-                    #     heading, movement = self.random_move(dir_possible)
-                    # else:
-                        # print "act"
-                        # heading, movement = self.act(dir_possible)
-                    # set movement and rotation
-                    # decide heading and movement when force the robot to enter the goal zone
-                    heading, movement = self.into_goal(pre_location_list, dir_possible)
-                    print "++++++", heading, movement
-                    movement, rotation = self.decide_move_n_rotation(heading, movement)
-                    cur_location = self.location[:]
-                    self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
-                self.move += 1
+                # collect possible heading and movement
+                logging.info(sensors)
+                # random select heading and movement
+                # print self.test, self.train
+                # if self.epsilon > random.random():
+                #     heading, movement = self.random_move(dir_possible)
+                # else:
+                    # print "act"
+                    # heading, movement = self.act(dir_possible)
+                # set movement and rotation
+                # decide heading and movement when force the robot to enter the goal zone
+                heading, movement = self.into_goal(pre_location_list, dir_possible)
+                movement, rotation = self.decide_move_n_rotation(heading, movement)
+                cur_location = self.location[:]
+                self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
+            self.move += 1
 
         # update location and heading
         self.heading, self.location = self.update_location(self.heading, self.location, movement, heading)
