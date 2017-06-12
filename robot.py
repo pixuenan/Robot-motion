@@ -35,19 +35,37 @@ class TraceBack(object):
         self.dead_end = False
         self.dead_end_back_step = 1
 
-    def dead_end_trace_back(self):
-        # last step of trace back
-        if self.rotate_degree != "0":
-            rotation, movement = self.rotate_degree, 0
-            self.reset_dead_end_traceback()
-        else:
-            if self.trace_list[-1][2] > 1:
-                self.rotate_degree = 0 - self.trace_list[-1][-3]
-            rotation = self.trace_rotation(self.dead_end_back_step)
-            movement = self.trace_movement()
-            del self.trace_list[-1]
-            self.dead_end_back_step += 1
+    # def dead_end_trace_back(self):
+    #     last step of trace back
+        # if self.rotate_degree != "0":
+        #     rotation, movement = self.rotate_degree, 0
+        #     self.reset_dead_end_traceback()
+        # else:
+        #     if self.trace_list[-1][2] > 1:
+        #         self.rotate_degree = 0 - self.trace_list[-1][-3]
+        #     rotation = self.trace_rotation(self.dead_end_back_step)
+        #     movement = self.trace_movement()
+        #     del self.trace_list[-1]
+        #     self.dead_end_back_step += 1
 
+    def dead_end_trace_back(self):
+        # first step of trace back
+        if self.dead_end_back_step == 1:
+            rotation, movement = 90, 0
+            self.dead_end_back_step += 1
+        elif self.rotate_degree != "0":
+            rotation, movement = self.rotate_degree, 0
+        else:
+            if self.dead_end_back_step == 2:
+                rotation, movement = 90, self.trace_list[-1][-1]
+            else:
+                rotation, movement = 0 - self.trace_list[-1][-3], self.trace_list[-1][-1]
+            if self.trace_list[-1][2] > 1:
+                self.dead_end_back_step = 1
+                self.rotate_degree = 0 - self.trace_list[-1][-3]
+            else:
+                self.dead_end_back_step += 1
+            del self.trace_list[-1]
         return rotation, movement
 
     def trace_movement(self):
@@ -132,17 +150,20 @@ class Robot(TraceBack, Score):
         self.step = 0
         self.epsilon = 0.5
 
+        self.joint_dict = dict()
+
         self.dead_end_list = []
 
         self.max_time = 1000
         self.Q_dict = dict()
+        self.t_dict = dict()
         self.rotate = False
         self.move = 0
         self.train_deadline = 30 * self.maze_dim / 2
         self.initial_location_pos_move = dict()
         logging.basicConfig(filename='test.log', filemode='w', level=logging.DEBUG)  ###
         self.build_Q_dict()
-
+        self.build_t_dict()
 
     def build_Q_dict(self):
         '''
@@ -159,6 +180,11 @@ class Robot(TraceBack, Score):
                         dist_reward = self.maze_dim - goal_dist
                         default_score[(heading, move)] = dist_reward
                 self.Q_dict[(row, column)] = default_score.copy()
+
+    def build_t_dict(self):
+        for row in range(self.maze_dim):
+            for column in range(self.maze_dim):
+                self.t_dict[(row, column)] = []
 
     @staticmethod
     def update_location(cur_heading, cur_location, movement, heading):
@@ -263,6 +289,15 @@ class Robot(TraceBack, Score):
             heading = dir_possible.keys()[0]
             movement = random.choice(range(1, min(dir_possible[heading], 3) + 1))
         return heading, movement
+
+    @staticmethod
+    def t_random_move(dir_possible):
+        # random select heading and movement
+        if len(dir_possible.keys()) > 1:
+            heading = random.choice(dir_possible.keys())
+        else:
+            heading = dir_possible.keys()[0]
+        return heading, 1
 
     def decide_move_n_rotation(self, heading, movement):
         '''
@@ -392,7 +427,8 @@ class Robot(TraceBack, Score):
         # self.epsilon = 0.5*math.cos(math.pi*self.step/4000)
         if self.step > 500:
             return "Reset", "Reset"
-        print "###", self.location, self.step
+        logging.info("### %s %d" % (str(self.location), self.step))
+        print self.location
         dir_possible = self.next_pos_move(sensors)
 
         # rest_step = self.train_deadline - self.move
@@ -416,29 +452,29 @@ class Robot(TraceBack, Score):
         #     print "Test %d" % self.test
         #     self.trace_back = True
         #     self.move = 0
-        logging.info("cur loc " + str(self.location) + ",head " + str(self.heading) + ",trace back " + str(self.trace_back))
-        logging.info("move " + str(self.move))
+        logging.info("cur loc " + str(self.location) + ",head " + str(self.heading) + ",trace back " + str(self.trace_list))
+        # logging.info("move " + str(self.move))
 
         # rotate the robot to the original direction after traceback
-        if self.location == [0, 0]:
+        # if self.location == [0, 0]:
             #
-            if "u" not in self.heading:
-                logging.info("ROTATING")
-                self.rotate = True
-                movement = 0
-                if "d" in self.heading:
-                    heading = 'l'
-                elif "r" in self.heading or "l" in self.heading:
-                    heading = 'u'
-                movement, rotation = self.decide_move_n_rotation(heading, movement)
-                self.move += 1
+            # if "u" not in self.heading:
+            #     logging.info("ROTATING")
+            #     self.rotate = True
+            #     movement = 0
+            #     if "d" in self.heading:
+            #         heading = 'l'
+            #     elif "r" in self.heading or "l" in self.heading:
+            #         heading = 'u'
+            #     movement, rotation = self.decide_move_n_rotation(heading, movement)
+            #     self.move += 1
 
-            else:
-                self.rotate = False
-                self.move = 0
+            # else:
+            #     self.rotate = False
+            #     self.move = 0
             # self.reset_traceback()
         #
-        if not self.rotate:
+        # if not self.rotate:
             # if self.trace_back:
             #     rotation, movement = self.trace_back_move()
             #     heading = self.rotation_to_heading(rotation)
@@ -446,55 +482,78 @@ class Robot(TraceBack, Score):
         #
             # else:
             # print '---', self.location
-            if sensors.count(0) == 3:
-                self.dead_end = True
-                self.dead_end_list += [self.location[:]]
-                print "bbbbb", self.location
-                self.update_Q_dict(dir_possible, dead_end=True)
+        if sensors.count(0) == 3:
+            logging.info("#dead end")
+            self.dead_end = True
+            # self.dead_end_list += [self.location[:]]
+            # print "bbbbb", self.location
+            # self.update_Q_dict(dir_possible, dead_end=True)
 
-            if self.dead_end:
-                if sum(sensors) == 1:
-                    self.dead_end_list += [self.location[:]]
-                    print "ccccc", self.location
-
-                rotation, movement = self.dead_end_trace_back()
-                heading = self.rotation_to_heading(rotation)
-                logging.info("DEAD END TRACE STEP: %d" % self.dead_end_back_step)
-                logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
-            # start dead end trace back
-
+        # joint location
+        # can only move one step every time
+        elif sensors.count(0) <= 1:
+            logging.info("#joint location")
+            logging.info(self.t_dict[tuple(self.location)])
+            # first time visit
+            if not self.t_dict[tuple(self.location)]:
+                heading, movement = self.t_random_move(dir_possible)
+                next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+                self.t_dict[tuple(self.location)] += [(heading, next_loc)]
             else:
-                pre_location_list = []
-                if self.location != [0, 0]:
-                    pre_location_list = list(zip(*self.trace_list)[0])
-                    if self.location in pre_location_list:
-                        self.update_Q_dict(dir_possible, repeat=True)
-                    else:
-                        self.update_Q_dict(dir_possible)
+                # traceback
+                trace_back = False
+                last_loc = self.trace_list[-1][0]
+                if last_loc in zip(*self.t_dict[tuple(self.location)])[1]:
+                    trace_back = True
+                if trace_back:
+                    for heading, next_loc in self.t_dict[tuple(self.location)]:
+                        if next_loc in zip(*self.t_dict[tuple(next_loc)]):
+                            del dir_possible[heading]
+                    heading, movement = self.t_random_move(dir_possible)
+                    next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+                    self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+                # not trace_back
                 else:
-                    self.remove_action(dir_possible)
+                    self.dead_end = True
 
-                # collect possible heading and movement
-                logging.info(sensors)
-                # random select heading and movement
-                # print self.test, self.train
-                # if self.epsilon > random.random():
-                #     heading, movement = self.random_move(dir_possible)
-                # else:
-                    # print "act"
-                    # heading, movement = self.act(dir_possible)
-                # set movement and rotation
-                # decide heading and movement when force the robot to enter the goal zone
-                heading, movement = self.into_goal(pre_location_list, dir_possible)
-                movement, rotation = self.decide_move_n_rotation(heading, movement)
-                cur_location = self.location[:]
-                self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
-            self.move += 1
+        # ordinary location
+        elif not self.dead_end:
+            logging.info("#ordinary location")
+            heading, movement = self.t_random_move(dir_possible)
+            next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+            self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+
+        if self.dead_end:
+            rotation, movement = self.dead_end_trace_back()
+            heading = self.rotation_to_heading(rotation)
+            next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+            self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+            logging.info("DEAD END TRACE STEP: %d" % (self.dead_end_back_step - 1))
+            logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
+            if self.rotate_degree != "0":
+                self.rotate_degree = "0"
+                self.dead_end = False
+
+        else:
+            pre_location_list = []
+            if self.location != [0, 0]:
+                pre_location_list = list(zip(*self.trace_list)[0])
+                if self.location in pre_location_list:
+                    self.update_Q_dict(dir_possible, repeat=True)
+                else:
+                    self.update_Q_dict(dir_possible)
+            else:
+                self.remove_action(dir_possible)
+
+            movement, rotation = self.decide_move_n_rotation(heading, movement)
+            cur_location = self.location[:]
+            self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
+        self.move += 1
 
         # update location and heading
         self.heading, self.location = self.update_location(self.heading, self.location, movement, heading)
-        logging.info("next loc" + str(self.location) + "end step")  ###
-        logging.info(str(self.trace_list))
+        # logging.info("next loc" + str(self.location) + "end step")  ###
+        # logging.info(str(self.trace_list))
         self.step += 1
 
         return rotation, movement
