@@ -26,6 +26,7 @@ class TraceBack(object):
         self.dead_end = False
         self.dead_end_back_step = 1
         self.next_rotation = 0
+        self.reset = False
 
     def update_list(self, location, heading, num_pos, rotation, next_heading, next_movement):
         self.trace_list += [(location, heading, num_pos, rotation, next_heading, next_movement)]
@@ -35,19 +36,34 @@ class TraceBack(object):
         self.dead_end = False
         self.dead_end_back_step = 1
 
-    def dead_end_trace_back(self):
-        # last step of trace back
-        if self.rotate_degree != "0":
-            rotation, movement = self.rotate_degree, 0
-            self.reset_dead_end_traceback()
-        else:
-            if self.trace_list[-1][2] > 1:
-                self.rotate_degree = 0 - self.trace_list[-1][-3]
-            rotation = self.trace_rotation(self.dead_end_back_step)
-            movement = self.trace_movement()
-            del self.trace_list[-1]
-            self.dead_end_back_step += 1
+    # def dead_end_trace_back(self):
+    #     last step of trace back
+        # if self.rotate_degree != "0":
+        #     rotation, movement = self.rotate_degree, 0
+        #     self.reset_dead_end_traceback()
+        # else:
+        #     if self.trace_list[-1][2] > 1:
+        #         self.rotate_degree = 0 - self.trace_list[-1][-3]
+        #     rotation = self.trace_rotation(self.dead_end_back_step)
+        #     movement = self.trace_movement()
+        #     del self.trace_list[-1]
+        #     self.dead_end_back_step += 1
 
+    def dead_end_trace_back(self):
+        # first step of trace back
+        if self.dead_end_back_step == 1:
+            rotation, movement = 90, 0
+        else:
+            if self.dead_end_back_step == 2:
+                rotation, movement = 90, self.trace_list[-1][-1]
+            else:
+                rotation, movement = 0 - self.trace_list[-1][-3], self.trace_list[-1][-1]
+            if self.trace_list[-1][2] > 1:
+                self.dead_end_back_step = 1
+                self.reset = True
+            else:
+                self.dead_end_back_step += 1
+            del self.trace_list[-1]
         return rotation, movement
 
     def trace_movement(self):
@@ -131,6 +147,8 @@ class Robot(TraceBack, Score):
         self.test = 0
         self.step = 0
         self.epsilon = 0.5
+
+        self.joint_dict = dict()
 
         self.dead_end_list = []
 
@@ -420,25 +438,25 @@ class Robot(TraceBack, Score):
         logging.info("move " + str(self.move))
 
         # rotate the robot to the original direction after traceback
-        if self.location == [0, 0]:
+        # if self.location == [0, 0]:
             #
-            if "u" not in self.heading:
-                logging.info("ROTATING")
-                self.rotate = True
-                movement = 0
-                if "d" in self.heading:
-                    heading = 'l'
-                elif "r" in self.heading or "l" in self.heading:
-                    heading = 'u'
-                movement, rotation = self.decide_move_n_rotation(heading, movement)
-                self.move += 1
+            # if "u" not in self.heading:
+            #     logging.info("ROTATING")
+            #     self.rotate = True
+            #     movement = 0
+            #     if "d" in self.heading:
+            #         heading = 'l'
+            #     elif "r" in self.heading or "l" in self.heading:
+            #         heading = 'u'
+            #     movement, rotation = self.decide_move_n_rotation(heading, movement)
+            #     self.move += 1
 
-            else:
-                self.rotate = False
-                self.move = 0
+            # else:
+            #     self.rotate = False
+            #     self.move = 0
             # self.reset_traceback()
         #
-        if not self.rotate:
+        # if not self.rotate:
             # if self.trace_back:
             #     rotation, movement = self.trace_back_move()
             #     heading = self.rotation_to_heading(rotation)
@@ -446,50 +464,85 @@ class Robot(TraceBack, Score):
         #
             # else:
             # print '---', self.location
-            if sensors.count(0) == 3:
-                self.dead_end = True
-                self.dead_end_list += [self.location[:]]
-                print "bbbbb", self.location
-                self.update_Q_dict(dir_possible, dead_end=True)
+        if sensors.count(0) == 3:
+            self.dead_end = True
+            # self.dead_end_list += [self.location[:]]
+            # print "bbbbb", self.location
+            # self.update_Q_dict(dir_possible, dead_end=True)
 
-            if self.dead_end:
-                if sum(sensors) == 1:
-                    self.dead_end_list += [self.location[:]]
-                    print "ccccc", self.location
-
-                rotation, movement = self.dead_end_trace_back()
-                heading = self.rotation_to_heading(rotation)
-                logging.info("DEAD END TRACE STEP: %d" % self.dead_end_back_step)
-                logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
-            # start dead end trace back
-
+        # joint location
+        if sensors.count(0) <= 1:
+            # first time visit
+            if self.location not in self.joint_dict.keys():
+                heading, movement = self.random_move(dir_possible)
+                self.joint_dict[self.location] = dict()
+                # mark the joint with one time visit direction
+                self.joint_dict[self.location][heading] = 0
+                self.joint_dict[self.location][dir_reverse[self.heading]] = 0
             else:
-                pre_location_list = []
-                if self.location != [0, 0]:
-                    pre_location_list = list(zip(*self.trace_list)[0])
-                    if self.location in pre_location_list:
-                        self.update_Q_dict(dir_possible, repeat=True)
-                    else:
-                        self.update_Q_dict(dir_possible)
-                else:
-                    self.remove_action(dir_possible)
+                # traceback
+                trace_back = False
+                for direction, status in self.joint_dict[self.location].items():
+                    if self.heading == dir_reverse[direction]:
+                        trace_back = True
+                        self.joint_dict[self.location][direction] = 1
+                    # delete the direction that has been traceback
+                    if self.joint_dict[self.location][direction] == 1:
+                        del dir_possible[dir_possible]
+                if trace_back:
+                    # choose action
+                    trace_back = False
+                    heading, movement = self.random_move(dir_possible)
+                    for direction, status in self.joint_dict[self.location].items():
+                        if heading == dir_reverse[direction]:
+                            trace_back = True
+                            self.joint_dict[self.location][direction] = 1
+                    if not trace_back:
+                        self.joint_dict[self.location][heading] = 0
 
-                # collect possible heading and movement
-                logging.info(sensors)
-                # random select heading and movement
-                # print self.test, self.train
-                # if self.epsilon > random.random():
-                #     heading, movement = self.random_move(dir_possible)
-                # else:
-                    # print "act"
-                    # heading, movement = self.act(dir_possible)
-                # set movement and rotation
-                # decide heading and movement when force the robot to enter the goal zone
-                heading, movement = self.into_goal(pre_location_list, dir_possible)
-                movement, rotation = self.decide_move_n_rotation(heading, movement)
-                cur_location = self.location[:]
-                self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
-            self.move += 1
+                # not trace_back
+                else:
+                    self.dead_end = True
+                    self.joint_dict[self.location][dir_reverse[self.heading]] = 1
+
+        if self.dead_end:
+            # if sum(sensors) == 1:
+            #     self.dead_end_list += [self.location[:]]
+            #     print "ccccc", self.location
+
+            rotation, movement = self.dead_end_trace_back()
+            heading = self.rotation_to_heading(rotation)
+            logging.info("DEAD END TRACE STEP: %d" % self.dead_end_back_step)
+            logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
+        # start dead end trace back
+
+        else:
+            pre_location_list = []
+            if self.location != [0, 0]:
+                pre_location_list = list(zip(*self.trace_list)[0])
+                if self.location in pre_location_list:
+                    self.update_Q_dict(dir_possible, repeat=True)
+                else:
+                    self.update_Q_dict(dir_possible)
+            else:
+                self.remove_action(dir_possible)
+
+            # collect possible heading and movement
+            logging.info(sensors)
+            # random select heading and movement
+            # print self.test, self.train
+            # if self.epsilon > random.random():
+            #     heading, movement = self.random_move(dir_possible)
+            # else:
+                # print "act"
+                # heading, movement = self.act(dir_possible)
+            # set movement and rotation
+            # decide heading and movement when force the robot to enter the goal zone
+            heading, movement = self.into_goal(pre_location_list, dir_possible)
+            movement, rotation = self.decide_move_n_rotation(heading, movement)
+            cur_location = self.location[:]
+            self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
+        self.move += 1
 
         # update location and heading
         self.heading, self.location = self.update_location(self.heading, self.location, movement, heading)
