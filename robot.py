@@ -420,6 +420,7 @@ class Robot(TraceBack, Score):
         logging.info("### %s %d" % (str(self.location), self.step))
         print self.location
         dir_possible = self.next_pos_move(sensors)
+        valid_dir = dir_possible.copy()
 
         # rest_step = self.train_deadline - self.move
         # check for goal entered
@@ -536,16 +537,17 @@ class Robot(TraceBack, Score):
                 self.t_dict[tuple(self.location)] += [(heading, next_loc)]
 
         else:
-        #     pre_location_list = []
-        #     if self.location != [0, 0]:
-        #         pre_location_list = list(zip(*self.trace_list)[0])
-        #         if self.location in pre_location_list:
-        #             self.update_Q_dict(dir_possible, repeat=True)
-        #         else:
-        #             self.update_Q_dict(dir_possible)
-        #     else:
-        #         self.remove_action(dir_possible)
-        #
+            pre_location_list = []
+            if self.location != [0, 0]:
+                # pre_location_list = list(zip(*self.trace_list)[0])
+                # if self.location in pre_location_list:
+                #     print "-------", dir_possible
+                #     self.update_Q_dict(dir_possible, repeat=True)
+                # else:
+                self.update_Q_dict(valid_dir)
+            else:
+                self.remove_action(valid_dir)
+
             movement, rotation = self.decide_move_n_rotation(heading, movement)
         cur_location = self.location[:]
         self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
