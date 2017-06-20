@@ -53,19 +53,9 @@ class TraceBack(object):
         if self.dead_end_back_step == 1:
             rotation, movement = 90, 0
             self.dead_end_back_step += 1
-        elif self.rotate_degree != "0":
-            rotation, movement = self.rotate_degree, 0
         else:
-            if self.dead_end_back_step == 2:
-                rotation, movement = 90, self.trace_list[-1][-1]
-            else:
-                rotation, movement = 0 - self.trace_list[-1][-3], self.trace_list[-1][-1]
-            if self.trace_list[-1][2] > 1:
-                self.dead_end_back_step = 1
-                self.rotate_degree = 0 - self.trace_list[-1][-3]
-            else:
-                self.dead_end_back_step += 1
-            del self.trace_list[-1]
+            rotation, movement = 90, 1
+            self.dead_end_back_step += 1
         return rotation, movement
 
     def trace_movement(self):
@@ -494,6 +484,8 @@ class Robot(TraceBack, Score):
         elif sensors.count(0) <= 1:
             logging.info("#joint location")
             logging.info(self.t_dict[tuple(self.location)])
+            print "#joint location"
+            print self.t_dict[tuple(self.location)]
             # first time visit
             if not self.t_dict[tuple(self.location)]:
                 heading, movement = self.t_random_move(dir_possible)
@@ -507,7 +499,8 @@ class Robot(TraceBack, Score):
                     trace_back = True
                 if trace_back:
                     for heading, next_loc in self.t_dict[tuple(self.location)]:
-                        if next_loc in zip(*self.t_dict[tuple(next_loc)]):
+                        if self.location in zip(*self.t_dict[tuple(next_loc)])[1] and heading in dir_possible:
+                            print "######", dir_possible
                             del dir_possible[heading]
                     heading, movement = self.t_random_move(dir_possible)
                     next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
@@ -523,31 +516,32 @@ class Robot(TraceBack, Score):
             next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
             self.t_dict[tuple(self.location)] += [(heading, next_loc)]
 
+        print self.t_dict[tuple(self.location)]
         if self.dead_end:
             rotation, movement = self.dead_end_trace_back()
             heading = self.rotation_to_heading(rotation)
             next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
-            self.t_dict[tuple(self.location)] += [(heading, next_loc)]
             logging.info("DEAD END TRACE STEP: %d" % (self.dead_end_back_step - 1))
             logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
-            if self.rotate_degree != "0":
-                self.rotate_degree = "0"
+            if self.dead_end_back_step == 3:
                 self.dead_end = False
+                self.dead_end_back_step = 1
+                self.t_dict[tuple(self.location)] += [(heading, next_loc)]
 
         else:
-            pre_location_list = []
-            if self.location != [0, 0]:
-                pre_location_list = list(zip(*self.trace_list)[0])
-                if self.location in pre_location_list:
-                    self.update_Q_dict(dir_possible, repeat=True)
-                else:
-                    self.update_Q_dict(dir_possible)
-            else:
-                self.remove_action(dir_possible)
-
+        #     pre_location_list = []
+        #     if self.location != [0, 0]:
+        #         pre_location_list = list(zip(*self.trace_list)[0])
+        #         if self.location in pre_location_list:
+        #             self.update_Q_dict(dir_possible, repeat=True)
+        #         else:
+        #             self.update_Q_dict(dir_possible)
+        #     else:
+        #         self.remove_action(dir_possible)
+        #
             movement, rotation = self.decide_move_n_rotation(heading, movement)
-            cur_location = self.location[:]
-            self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
+        cur_location = self.location[:]
+        self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
         self.move += 1
 
         # update location and heading
