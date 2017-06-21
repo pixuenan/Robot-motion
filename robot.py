@@ -137,8 +137,9 @@ class Robot(TraceBack, Score):
                          [self.maze_dim/2, self.maze_dim/2]]
         self.alpha = 0.8
         self.test = 0
-        self.step = 0
+        # self.step = 0
         self.epsilon = 0.5
+        self.run = 1
 
         self.joint_dict = dict()
 
@@ -148,6 +149,7 @@ class Robot(TraceBack, Score):
         self.Q_dict = dict()
         self.t_dict = dict()
         self.rotate = False
+        self.mode = None
         self.move = 0
         self.train_deadline = 30 * self.maze_dim / 2
         self.initial_location_pos_move = dict()
@@ -215,9 +217,9 @@ class Robot(TraceBack, Score):
             reward = self.get_score(self.train_deadline, self.move-1, dead_end=False, repeat=True)
         else:
             reward = self.get_score(self.train_deadline, self.move-1, dead_end, repeat)
-        goal_dist = abs(self.location[0]-((self.maze_dim-1)/2)) + abs(self.location[1]-((self.maze_dim-1)/2))
-        dist_reward = self.maze_dim - goal_dist
-        reward += dist_reward
+        # goal_dist = abs(self.location[0]-((self.maze_dim-1)/2)) + abs(self.location[1]-((self.maze_dim-1)/2))
+        # dist_reward = self.maze_dim - goal_dist
+        # reward += dist_reward
         if goal:
             reward += 30
         # if self.closer(self.location, location):
@@ -280,15 +282,6 @@ class Robot(TraceBack, Score):
             movement = random.choice(range(1, min(dir_possible[heading], 3) + 1))
         return heading, movement
 
-    @staticmethod
-    def t_random_move(dir_possible):
-        # random select heading and movement
-        if len(dir_possible.keys()) > 1:
-            heading = random.choice(dir_possible.keys())
-        else:
-            heading = dir_possible.keys()[0]
-        return heading, 1
-
     def decide_move_n_rotation(self, heading, movement):
         '''
         Decide movement and rotation
@@ -340,54 +333,124 @@ class Robot(TraceBack, Score):
         heading, movement = random.choice(max_Q_action)
         return heading, movement
 
-    def into_goal(self, pre_location_list, dir_possible):
+    def force_goal(self, sensors, dir_possible):
         '''
-        Choose the movement and rotation that the next location is not be visited yet.
-        And force the robot to enter the goal zone
-        :param pre_location_list:
+        Force the bot to enter the goal zone by Tremaux's algorithm
+        :param sensors:
         :param dir_possible:
         :return:
         '''
-        print dir_possible
-        next_loc_dict = dict()
-        result_dict = dict()
-        # record dead end location
-        # get all the next loactions from dir_possible
-        # only the movement not in the pre_location_list, dead_end_location_list will be included
-        for heading, movement in dir_possible.items():
-            for poss_move in range(1, movement+1):
-                location = self.location[:]
-                next_loc = self.update_location(self.heading, location, poss_move, heading)[1]
-                # if goal zone is in the next locations, choose that action
-                if next_loc in self.goal_loc:
-                    return heading, movement
-                # goal_dist = abs(next_loc[0]-((self.maze_dim-1)/2)) + abs(next_loc[1]-((self.maze_dim-1)/2))
-                print ":::::::::", next_loc
-                next_loc_dict[(heading, poss_move)] = next_loc
+        valid_dir = dir_possible.copy()
 
-        if len(next_loc_dict) == 1:
-            location = self.location[:]
-            print "Only", location
-            next_loc = self.update_location(self.heading, location, dir_possible.values()[0], dir_possible.keys()[0])[1]
-            if next_loc in self.dead_end_list:
-                print "aaaaa", location
-                self.dead_end_list += [self.location[:]]
-            return dir_possible.items()[0]
-        else:
-            for (heading, poss_move), next_loc in next_loc_dict.items():
-                if next_loc in self.dead_end_list:
-                    del next_loc_dict[(heading, poss_move)]
-                    print "*", next_loc, self.dead_end_list
-            if next_loc_dict:
-                for (heading, poss_move), next_loc in next_loc_dict.items():
-                    if next_loc not in pre_location_list:
-                        result_dict[heading] = poss_move
-                if result_dict:
-                    return self.random_move(result_dict)
+        if not self.dead_end:
+            if sensors.count(0) == 3:
+                logging.info("#dead end")
+                self.dead_end = True
+                self.update_Q_dict(valid_dir, dead_end=True)
+
+            # junction
+            # can only move one step every time
+            elif sensors.count(0) <= 1:
+                logging.info("#joint location")
+                logging.info(self.t_dict[tuple(self.location)])
+                # print "#joint location"
+                # print self.t_dict[tuple(self.location)]
+                # first time visit
+                if not self.t_dict[tuple(self.location)]:
+                    heading, movement = random.choice(dir_possible.keys()), 1
+                    next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+                    self.t_dict[tuple(self.location)] += [(heading, next_loc)]
                 else:
-                    return self.random_move({heading: movement for (heading, movement) in next_loc_dict.keys()})
+                    # check traceback
+                    trace_back = False
+                    last_loc = self.trace_list[-1][0]
+                    if last_loc in zip(*self.t_dict[tuple(self.location)])[1]:
+                        trace_back = True
+                    if trace_back:
+                        exit_direction = []
+                        for heading in dir_possible.keys():
+                            next_loc = self.update_location(dir_sensors[heading][0], self.location[:], 1, heading)[1]
+                            if next_loc in zip(*self.t_dict[tuple(self.location)])[1]:
+                                del dir_possible[heading]
+                            elif self.t_dict[tuple(next_loc)] and self.location in zip(*self.t_dict[tuple(next_loc)])[1]:
+                                del dir_possible[heading]
+                                exit_direction += [heading]
+                        # junction without unlabeled passages
+                        if not dir_possible:
+                            heading, movement = random.choice(exit_direction), 1
+                        # junction with unlabeled passages
+                        else:
+                            heading, movement = random.choice(dir_possible.keys()), 1
+
+                        next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+                        self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+                    # not first time visit and not trace back, dead end
+                    else:
+                        self.dead_end = True
+                        self.update_Q_dict(valid_dir, dead_end=True)
+
+            # ordinary location, sensor.count(0) = 2
             else:
-                return self.random_move(dir_possible)
+                logging.info("#ordinary location")
+                heading, movement = random.choice(dir_possible.keys()), 1
+                next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+                self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+
+        # re-check dead_end
+        if self.dead_end:
+            rotation, movement = self.dead_end_trace_back()
+            heading = self.rotation_to_heading(rotation)
+            next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
+            logging.info("DEAD END TRACE STEP: %d" % (self.dead_end_back_step - 1))
+            logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
+            if self.dead_end_back_step == 3:
+                self.dead_end = False
+                self.dead_end_back_step = 1
+                self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+
+        else:
+            if self.location != [0, 0]:
+                self.update_Q_dict(valid_dir)
+            else:
+                self.remove_action(valid_dir)
+            movement, rotation = self.decide_move_n_rotation(heading, movement)
+
+        return movement, rotation, heading
+
+    def roam_act(self, sensors, dir_possible):
+        if sum(sensors) == 0:
+            self.dead_end = True
+            self.update_Q_dict(dir_possible, dead_end=True)
+
+        if self.dead_end:
+            rotation, movement = self.dead_end_trace_back()
+            heading = self.rotation_to_heading(rotation)
+            logging.info("DEAD END TRACE STEP: %d" % self.dead_end_back_step)
+            logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
+
+        else:
+            if self.location != [0, 0]:
+                # pre_location_list = zip(*self.trace_list)[0]
+                # if self.location in pre_location_list:
+                #     self.update_Q_dict(dir_possible, repeat=True)
+                self.update_Q_dict(dir_possible)
+            else:
+                self.remove_action(dir_possible)
+
+            # collect possible heading and movement
+            logging.info(sensors)
+            # random select heading and movement
+            # print self.test, self.train
+            if self.mode == "Roam":
+                heading, movement = self.random_move(dir_possible)
+            elif self.mode == "Explore":
+                # if self.epsilon > random.random():
+                #     heading, movement = self.random_move(dir_possible)
+                # else:
+                heading, movement = self.act(dir_possible)
+            # set movement and rotation
+            movement, rotation = self.decide_move_n_rotation(heading, movement)
+        return movement, rotation, heading
 
     def next_move(self, sensors):
         '''
@@ -417,10 +480,13 @@ class Robot(TraceBack, Score):
         # self.epsilon = 0.5*math.cos(math.pi*self.step/4000)
         # if self.step > 500:
         #     return "Reset", "Reset"
-        logging.info("### %s %d" % (str(self.location), self.step))
+        # logging.info("### %s %d" % (str(self.location), self.step))
         print self.location
         dir_possible = self.next_pos_move(sensors)
-        valid_dir = dir_possible.copy()
+        if self.move == 0 and self.run == 1:
+            self.mode = "Force goal"
+        elif self.run == 2:
+            self.mode = "Explore"
 
         # rest_step = self.train_deadline - self.move
         # check for goal entered
@@ -428,13 +494,22 @@ class Robot(TraceBack, Score):
         # if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
             logging.info("GOAL")
             print "GOAL"
-            print self.step
-            self.trace_back = True
-            self.test += 1
-            print "Test %d" % self.test
-            self.move = 0
+            print self.move
+            # self.trace_back = True
+            # self.test += 1
+            # print "Test %d" % self.test
+            # self.move = 0
             self.update_Q_dict(dir_possible, goal=True)
-            return "Reset", "Reset"
+            if self.mode == "Force goal" and self.move < 80:
+                for row in range(self.maze_dim):
+                    for column in range(self.maze_dim):
+                        print row, ",", column
+                        print self.Q_dict[(row, column)]
+                self.run = 2
+                self.location, self.heading = [0, 0], "u"
+                return "Reset", "Reset"
+            else:
+                print "One more"
         #
         # if self.move >= self.train_deadline:
         #     logging.info("DEADLINE")
@@ -473,82 +548,11 @@ class Robot(TraceBack, Score):
         #
             # else:
             # print '---', self.location
-        if sensors.count(0) == 3:
-            logging.info("#dead end")
-            self.dead_end = True
 
-        # joint location
-        # can only move one step every time
-        elif sensors.count(0) <= 1:
-            logging.info("#joint location")
-            logging.info(self.t_dict[tuple(self.location)])
-            print "#joint location"
-            print self.t_dict[tuple(self.location)]
-            # first time visit
-            if not self.t_dict[tuple(self.location)]:
-                heading, movement = self.t_random_move(dir_possible)
-                next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
-                self.t_dict[tuple(self.location)] += [(heading, next_loc)]
-            else:
-                # traceback
-                trace_back = False
-                last_loc = self.trace_list[-1][0]
-                if last_loc in zip(*self.t_dict[tuple(self.location)])[1]:
-                    trace_back = True
-                if trace_back:
-                    exit_direction = []
-                    for heading in dir_possible.keys():
-                        next_loc = self.update_location(dir_sensors[heading][0], self.location[:], 1, heading)[1]
-                        if next_loc in zip(*self.t_dict[tuple(self.location)])[1]:
-                            del dir_possible[heading]
-                        elif self.t_dict[tuple(next_loc)] and self.location in zip(*self.t_dict[tuple(next_loc)])[1]:
-                            del dir_possible[heading]
-                            exit_direction += [heading]
-                    # junction without unlabeled passages
-                    if not dir_possible:
-                        heading, movement = random.choice(exit_direction), 1
-                    # junction with unlabeled passages
-                    else:
-                        heading, movement = random.choice(dir_possible.keys()), 1
-
-                    next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
-                    self.t_dict[tuple(self.location)] += [(heading, next_loc)]
-                # not trace_back
-                else:
-                    self.dead_end = True
-
-        # ordinary location
-        elif not self.dead_end:
-            logging.info("#ordinary location")
-            heading, movement = self.t_random_move(dir_possible)
-            next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
-            self.t_dict[tuple(self.location)] += [(heading, next_loc)]
-
-        print self.t_dict[tuple(self.location)]
-        if self.dead_end:
-            rotation, movement = self.dead_end_trace_back()
-            heading = self.rotation_to_heading(rotation)
-            next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
-            logging.info("DEAD END TRACE STEP: %d" % (self.dead_end_back_step - 1))
-            logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
-            if self.dead_end_back_step == 3:
-                self.dead_end = False
-                self.dead_end_back_step = 1
-                self.t_dict[tuple(self.location)] += [(heading, next_loc)]
-
-        else:
-            pre_location_list = []
-            if self.location != [0, 0]:
-                # pre_location_list = list(zip(*self.trace_list)[0])
-                # if self.location in pre_location_list:
-                #     print "-------", dir_possible
-                #     self.update_Q_dict(dir_possible, repeat=True)
-                # else:
-                self.update_Q_dict(valid_dir)
-            else:
-                self.remove_action(valid_dir)
-
-            movement, rotation = self.decide_move_n_rotation(heading, movement)
+        if self.mode == "Force goal":
+            movement, rotation, heading = self.force_goal(sensors, dir_possible)
+        elif self.mode in ["Roam", "Explore"]:
+            movement, rotation, heading = self.roam_act(sensors, dir_possible)
         cur_location = self.location[:]
         self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
         self.move += 1
@@ -557,6 +561,6 @@ class Robot(TraceBack, Score):
         self.heading, self.location = self.update_location(self.heading, self.location, movement, heading)
         # logging.info("next loc" + str(self.location) + "end step")  ###
         # logging.info(str(self.trace_list))
-        self.step += 1
+        # self.step += 1
 
         return rotation, movement
