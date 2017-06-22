@@ -107,7 +107,7 @@ class Score(object):
         self.penalty = (math.pow(gradient, fnc) - 1) / (gradient - 1)
         # print "penalty", self.penalty
 
-    def get_score(self, deadline, move, dead_end=False, repeat=False):
+    def get_score(self, dead_end=False, repeat=False):
         self.reward = 2 * random.random() - 1
         if dead_end:
             self.reward -= 10
@@ -212,11 +212,11 @@ class Robot(TraceBack, Score):
         location = tuple(self.trace_list[-1][0])
         action = tuple([self.trace_list[-1][-2], abs(self.trace_list[-1][-1])])
         if dead_end:
-            reward = self.get_score(self.train_deadline, self.move-1, dead_end=True, repeat=False)
+            reward = self.get_score(dead_end=True, repeat=False)
         elif repeat:
-            reward = self.get_score(self.train_deadline, self.move-1, dead_end=False, repeat=True)
+            reward = self.get_score(dead_end=False, repeat=True)
         else:
-            reward = self.get_score(self.train_deadline, self.move-1, dead_end, repeat)
+            reward = self.get_score(dead_end, repeat)
         # goal_dist = abs(self.location[0]-((self.maze_dim-1)/2)) + abs(self.location[1]-((self.maze_dim-1)/2))
         # dist_reward = self.maze_dim - goal_dist
         # reward += dist_reward
@@ -384,6 +384,17 @@ class Robot(TraceBack, Score):
 
                         next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
                         self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+                        # update the Q_dict the direction to the traced location is repeat
+                        reward = self.get_score(repeat=True)
+                        cur_location = tuple(self.location[:])
+                        move_action = (dir_reverse[self.trace_list[-1][-2]], 1)
+                        # print "#####", self.Q_dict[cur_location]
+                        # print "-----", action
+                        original_Qvaule = self.Q_dict[cur_location][move_action]
+                        max_cur_Qvalue = self.Q_dict[tuple(last_loc)].copy().values() and max(self.Q_dict[tuple(last_loc)].copy().values()) or 0
+                        # Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
+                        Qvalue = original_Qvaule + self.alpha * (reward + 0.5 * max_cur_Qvalue - original_Qvaule)
+                        self.Q_dict[cur_location][move_action] = Qvalue
                     # not first time visit and not trace back, dead end
                     else:
                         self.dead_end = True
@@ -448,6 +459,7 @@ class Robot(TraceBack, Score):
                 #     heading, movement = self.random_move(dir_possible)
                 # else:
                 heading, movement = self.act(dir_possible)
+                print "**", sensors
             # set movement and rotation
             movement, rotation = self.decide_move_n_rotation(heading, movement)
         return movement, rotation, heading
@@ -500,7 +512,7 @@ class Robot(TraceBack, Score):
             # print "Test %d" % self.test
             # self.move = 0
             self.update_Q_dict(dir_possible, goal=True)
-            if self.mode == "Force goal" and self.move < 80:
+            if self.mode == "Force goal":# and self.move < 80:
                 for row in range(self.maze_dim):
                     for column in range(self.maze_dim):
                         print row, ",", column
@@ -523,22 +535,22 @@ class Robot(TraceBack, Score):
 
         # rotate the robot to the original direction after traceback
         # if self.location == [0, 0]:
-            #
-            # if "u" not in self.heading:
-            #     logging.info("ROTATING")
-            #     self.rotate = True
-            #     movement = 0
-            #     if "d" in self.heading:
-            #         heading = 'l'
-            #     elif "r" in self.heading or "l" in self.heading:
-            #         heading = 'u'
-            #     movement, rotation = self.decide_move_n_rotation(heading, movement)
-            #     self.move += 1
-
-            # else:
-            #     self.rotate = False
-            #     self.move = 0
-            # self.reset_traceback()
+        #
+        #     if "u" not in self.heading:
+        #         logging.info("ROTATING")
+        #         self.rotate = True
+        #         movement = 0
+        #         if "d" in self.heading:
+        #             heading = 'l'
+        #         elif "r" in self.heading or "l" in self.heading:
+        #             heading = 'u'
+        #         movement, rotation = self.decide_move_n_rotation(heading, movement)
+        #         self.move += 1
+        #
+        #     else:
+        #         self.rotate = False
+        #         self.move = 0
+        #     self.reset_traceback()
         #
         # if not self.rotate:
             # if self.trace_back:
