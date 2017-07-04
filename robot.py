@@ -144,6 +144,7 @@ class Robot(TraceBack, Score):
         self.joint_dict = dict()
 
         self.dead_end_list = []
+        self.force_list = []
 
         self.max_time = 1000
         self.Q_dict = dict()
@@ -333,6 +334,20 @@ class Robot(TraceBack, Score):
         heading, movement = random.choice(max_Q_action)
         return heading, movement
 
+    def remove_invalid_path(self):
+        '''
+        Remove the invalid path during force goal in the list
+        :return:
+        '''
+        if zip(*self.force_list)[1].count(self.location) > 1:
+            del self.force_list[-1]
+            last_occur = -1
+            for idx, elt in enumerate(reversed(self.force_list)):
+                if elt[1] == self.location:
+                    last_occur = len(self.force_list) - 1 - idx
+                    break
+            self.force_list = self.force_list[:last_occur + 1]
+
     def force_goal(self, sensors, dir_possible):
         '''
         Force the bot to enter the goal zone by Tremaux's algorithm
@@ -347,6 +362,7 @@ class Robot(TraceBack, Score):
                 logging.info("#dead end")
                 self.dead_end = True
                 self.update_Q_dict(valid_dir, dead_end=True)
+                del self.force_list[-1]
 
             # junction
             # can only move one step every time
@@ -360,6 +376,7 @@ class Robot(TraceBack, Score):
                     heading, movement = random.choice(dir_possible.keys()), 1
                     next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
                     self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+                    self.force_list += [(heading, next_loc)]
                 else:
                     # check traceback
                     trace_back = False
@@ -368,6 +385,7 @@ class Robot(TraceBack, Score):
                         trace_back = True
                     if trace_back:
                         exit_direction = []
+                        self.remove_invalid_path()
                         for heading in dir_possible.keys():
                             next_loc = self.update_location(dir_sensors[heading][0], self.location[:], 1, heading)[1]
                             if next_loc in zip(*self.t_dict[tuple(self.location)])[1]:
@@ -384,21 +402,23 @@ class Robot(TraceBack, Score):
 
                         next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
                         self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+                        self.force_list += [(heading, next_loc)]
                         # update the Q_dict the direction to the traced location is repeat
-                        reward = self.get_score(repeat=True)
-                        cur_location = tuple(self.location[:])
-                        move_action = (dir_reverse[self.trace_list[-1][-2]], 1)
-                        # print "#####", self.Q_dict[cur_location]
-                        # print "-----", action
-                        original_Qvaule = self.Q_dict[cur_location][move_action]
-                        max_cur_Qvalue = self.Q_dict[tuple(last_loc)].copy().values() and max(self.Q_dict[tuple(last_loc)].copy().values()) or 0
-                        # Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
-                        Qvalue = original_Qvaule + self.alpha * (reward + 0.5 * max_cur_Qvalue - original_Qvaule)
-                        self.Q_dict[cur_location][move_action] = Qvalue
-                    # not first time visit and not trace back, dead end
+                        # reward = self.get_score(repeat=True)
+                        # cur_location = tuple(self.location[:])
+                        # move_action = (dir_reverse[self.trace_list[-1][-2]], 1)
+                        # original_Qvaule = self.Q_dict[cur_location][move_action]
+                        # max_cur_Qvalue = self.Q_dict[tuple(last_loc)].copy().values() and max(self.Q_dict[tuple(last_loc)].copy().values()) or 0
+                        # # Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
+                        # Qvalue = original_Qvaule + self.alpha * (reward + 0.5 * max_cur_Qvalue - original_Qvaule)
+                        # self.Q_dict[cur_location][move_action] = Qvalue
+                    # not first time visit and not trace back, regarded as dead end
                     else:
                         self.dead_end = True
-                        self.update_Q_dict(valid_dir, dead_end=True)
+                        next_loc = self.force_list[-2]
+                        # self.update_Q_dict(valid_dir, dead_end=True)
+                        self.remove_invalid_path()
+                        self.force_list += [(dir_reverse[self.heading], next_loc[1])]
 
             # ordinary location, sensor.count(0) = 2
             else:
@@ -406,6 +426,7 @@ class Robot(TraceBack, Score):
                 heading, movement = random.choice(dir_possible.keys()), 1
                 next_loc = self.update_location(dir_sensors[heading][0], self.location[:], movement, heading)[1]
                 self.t_dict[tuple(self.location)] += [(heading, next_loc)]
+                self.force_list += [(heading, next_loc)]
 
         # re-check dead_end
         if self.dead_end:
@@ -427,6 +448,27 @@ class Robot(TraceBack, Score):
             movement, rotation = self.decide_move_n_rotation(heading, movement)
 
         return movement, rotation, heading
+
+    def force_update(self):
+        '''
+        Update the Q dict after the bot enter the goal zone
+        :return:
+        '''
+        next_loc = self.force_list[0][1]
+        for direction in dir_sensors['u']:
+            poss_location = self.update_location('u', [0, 0], 1, direction)
+            if poss_location[1] == next_loc:
+                self.force_list.insert(0, (direction, [0, 0]))
+        print self.force_list
+        for idx, (pre_heading, loc) in enumerate(self.force_list[:-1]):
+            heading, next_loc = idx < len(self.force_list) - 1 and self.force_list[idx + 1] or (None, None)
+            n_heading, n_next_loc = idx < len(self.force_list) - 2 and self.force_list[idx + 2] or (None, None)
+            nn_heading, nn_next_loc = idx < len(self.force_list) - 3 and self.force_list[idx + 3] or (None, None)
+            self.Q_dict[tuple(loc)][(heading, 1)] += 10
+            if n_heading == heading:
+                self.Q_dict[tuple(loc)][(heading, 2)] += 12
+                if n_heading == nn_heading:
+                    self.Q_dict[tuple(loc)][(heading, 3)] += 14
 
     def roam_act(self, sensors, dir_possible):
         if sum(sensors) == 0:
@@ -459,7 +501,6 @@ class Robot(TraceBack, Score):
                 #     heading, movement = self.random_move(dir_possible)
                 # else:
                 heading, movement = self.act(dir_possible)
-                print "**", sensors
             # set movement and rotation
             movement, rotation = self.decide_move_n_rotation(heading, movement)
         return movement, rotation, heading
@@ -493,7 +534,8 @@ class Robot(TraceBack, Score):
         # if self.step > 500:
         #     return "Reset", "Reset"
         # logging.info("### %s %d" % (str(self.location), self.step))
-        print self.location
+        # print self.location
+        # print self.force_list
         dir_possible = self.next_pos_move(sensors)
         if self.move == 0 and self.run == 1:
             self.mode = "Force goal"
@@ -512,11 +554,12 @@ class Robot(TraceBack, Score):
             # print "Test %d" % self.test
             # self.move = 0
             self.update_Q_dict(dir_possible, goal=True)
-            if self.mode == "Force goal":# and self.move < 80:
-                for row in range(self.maze_dim):
-                    for column in range(self.maze_dim):
-                        print row, ",", column
-                        print self.Q_dict[(row, column)]
+            if self.mode == "Force goal":
+                # for row in range(self.maze_dim):
+                #     for column in range(self.maze_dim):
+                #         print row, ",", column
+                #         print self.Q_dict[(row, column)]
+                self.force_update()
                 self.run = 2
                 self.location, self.heading = [0, 0], "u"
                 return "Reset", "Reset"
@@ -535,22 +578,22 @@ class Robot(TraceBack, Score):
 
         # rotate the robot to the original direction after traceback
         # if self.location == [0, 0]:
-        #
-        #     if "u" not in self.heading:
-        #         logging.info("ROTATING")
-        #         self.rotate = True
-        #         movement = 0
-        #         if "d" in self.heading:
-        #             heading = 'l'
-        #         elif "r" in self.heading or "l" in self.heading:
-        #             heading = 'u'
-        #         movement, rotation = self.decide_move_n_rotation(heading, movement)
-        #         self.move += 1
-        #
-        #     else:
-        #         self.rotate = False
-        #         self.move = 0
-        #     self.reset_traceback()
+            #
+            # if "u" not in self.heading:
+            #     logging.info("ROTATING")
+            #     self.rotate = True
+            #     movement = 0
+            #     if "d" in self.heading:
+            #         heading = 'l'
+            #     elif "r" in self.heading or "l" in self.heading:
+            #         heading = 'u'
+            #     movement, rotation = self.decide_move_n_rotation(heading, movement)
+            #     self.move += 1
+
+            # else:
+            #     self.rotate = False
+            #     self.move = 0
+            # self.reset_traceback()
         #
         # if not self.rotate:
             # if self.trace_back:
