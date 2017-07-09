@@ -220,13 +220,13 @@ class Robot(TraceBack, Score):
             reward = self.get_score(dead_end=False, repeat=True)
         else:
             reward = self.get_score(dead_end, repeat)
-        # goal_dist = abs(self.location[0]-((self.maze_dim-1)/2)) + abs(self.location[1]-((self.maze_dim-1)/2))
-        # dist_reward = self.maze_dim - goal_dist
-        # reward += dist_reward
+        goal_dist = abs(self.location[0]-((self.maze_dim-1)/2)) + abs(self.location[1]-((self.maze_dim-1)/2))
+        dist_reward = self.maze_dim - goal_dist
+        reward += dist_reward
         if goal:
             reward += 30
-        # if self.closer(self.location, location):
-        #     reward += 10
+        if self.closer(self.location, location):
+            reward += 10
         original_Qvaule = self.Q_dict[location][action]
         max_cur_Qvalue = self.Q_dict[tuple(self.location)].copy().values() and max(self.Q_dict[tuple(self.location)].copy().values()) or 0
         # Qvalue = original_Qvaule + self.alpha * (reward - original_Qvaule)
@@ -326,6 +326,8 @@ class Robot(TraceBack, Score):
         action_dict = self.Q_dict[tuple(self.location)].copy()
         for key, value in action_dict.items():
             if key[0] not in dir_possible.keys() or key[1] > dir_possible[key[0]]:
+                # print "possible move", dir_possible
+                # print "action dict", action_dict
                 del action_dict[key]
         max_Q_action = []
         max_Q_value = max(action_dict.values())
@@ -478,12 +480,26 @@ class Robot(TraceBack, Score):
         return movement, rotation, heading
 
     def goal_act(self, sensors, dir_possible):
-        if self.location != [0, 0]:
+        if sum(sensors) == 0:
+            self.dead_end = True
+            self.update_Q_dict(dir_possible, dead_end=True)
+
+        if self.dead_end:
+            rotation, movement = self.dead_end_trace_back()
+            heading = self.rotation_to_heading(rotation)
+            logging.info("DEAD END TRACE STEP: %d" % self.dead_end_back_step)
+            logging.info("DEAD END TRACE BACK: %d, %d" % (rotation, movement))
+            if self.dead_end_back_step == 3:
+                self.dead_end = False
+                self.dead_end_back_step = 1
+
+        elif self.location != [0, 0]:
             self.update_Q_dict(dir_possible)
+            heading, movement = self.act(dir_possible)
         else:
             self.remove_action(dir_possible)
+            heading, movement = self.act(dir_possible)
 
-        heading, movement = self.act(dir_possible)
         movement, rotation = self.decide_move_n_rotation(heading, movement)
         return movement, rotation, heading
 
@@ -526,7 +542,7 @@ class Robot(TraceBack, Score):
 
         # rest_step = self.train_deadline - self.move
         # check for goal entered
-        if self.location in self.goal_loc:
+        if self.location in self.goal_loc and self.mode != "Roam":
         # if self.location[0] in goal_bounds and self.location[1] in goal_bounds:
             logging.info("GOAL")
             print "GOAL"
@@ -534,10 +550,18 @@ class Robot(TraceBack, Score):
             self.update_Q_dict(dir_possible, goal=True)
             if self.mode == "Force goal":
                 self.force_update()
-                # # self.run = 2
-                # self.location, self.heading = [0, 0], "u"
-                # return "reset", "reset"
                 self.mode = "Roam"
+                # self.run = 2
+                # self.location, self.heading = [0, 0], "u"
+                # return "Reset", "Reset"
+            elif self.mode == "Goal" and self.run == 1:
+                if self.move > 600:
+                    self.run = 2
+                    self.location, self.heading = [0, 0], "u"
+                    return "Reset", "Reset"
+
+                else:
+                    self.mode = "Roam"
         #
         # if self.move >= self.train_deadline:
         #     logging.info("DEADLINE")
@@ -580,8 +604,19 @@ class Robot(TraceBack, Score):
         if self.mode == "Force goal":
             movement, rotation, heading = self.force_goal(sensors, dir_possible)
         elif self.mode == "Roam":
-            movement, rotation, heading = self.roam_act(sensors, dir_possible)
+            # print "location", self.location
+            # print "initial possible", dir_possible, sensors
+            if self.roam_move < self.maze_dim * 5:
+                movement, rotation, heading = self.roam_act(sensors, dir_possible)
+                self.roam_move += 1
+            else:
+                # print "Roam end", self.location
+                # print "possible", dir_possible, sensors
+                movement, rotation, heading = self.goal_act(sensors, dir_possible)
+                self.mode = "Goal"
+                self.roam_move = 0
         elif self.mode == "Goal":
+            # print "Goaling", self.location
             movement, rotation, heading = self.goal_act(sensors, dir_possible)
         cur_location = self.location[:]
         self.update_list(cur_location, self.heading, len(dir_possible.keys()), rotation, heading, movement)
