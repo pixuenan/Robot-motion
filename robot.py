@@ -13,7 +13,68 @@ dir_rotation_heading = {90: [('l', 'u'), ('r', 'd'), ('u', 'r'), ('d', 'l'),
                         -90: [('l', 'd'), ('r', 'u'), ('u', 'l'), ('d', 'r'),
                               ('left', 'd'), ('right', 'u'), ('up', 'l'), ('down', 'r')]}
 
-class Robot(object):
+class Vertex(object):
+    def __init__(self, loc, dim):
+        """
+        :param loc: location in the maze such as (0, 0)
+        """
+        self.loc = loc
+        self.rhs = float("inf")
+        self.g = float("inf")
+        self.h = 0
+        self.key = [0, 0]
+        self.parents = []
+        self.children = []
+        self._init_children_parent(dim)
+
+    def calculate_key(self):
+        self.key[0] = min([self.g, self.rhs]) + self.h
+        self.key[1] = min([self.g, self.rhs])
+
+    def del_children(self, children_node):
+        del self.children[self.children.index(children_node)]
+
+    def del_parent(self, parent_node):
+        del self.parents[self.parents.index(parent_node)]
+
+    def _init_children_parent(self, dim):
+        x, y = self.loc
+        self.add_vertex_loc(x, y, dim, self.children)
+        self.add_vertex_loc(x, y, dim, self.parents)
+
+    @staticmethod
+    def add_vertex_loc(x, y, dim, the_list):
+        if x - 1 > 0:
+            the_list.append((x-1, y))
+        if x + 1 < dim - 1:
+            the_list.append((x+1, y))
+        if y - 1 > 0:
+            the_list.append((x, y-1))
+        if y + 1 < dim - 1:
+            the_list.append((x, y+1))
+
+
+class Graph(object):
+    def __init__(self, dim):
+        self.dim = dim
+        self.graph = {}
+        self._init_vertex()
+        self.goal_loc = [[self.dim/2-1, self.dim/2-1],
+                         [self.dim/2, self.dim/2-1],
+                         [self.dim/2-1, self.dim/2],
+                         [self.dim/2, self.dim/2]]
+
+    def _init_vertex(self):
+        """
+        :return: list of children list based on the location of the node
+        """
+        for x in range(self.dim):
+            for y in range(self.dim):
+                node = Vertex((x, y), self.dim)
+                self.graph[(x, y)] = node
+
+
+class Robot(Graph):
     def __init__(self, maze_dim):
         '''
         Use the initialization function to set up attributes that your robot
@@ -21,36 +82,13 @@ class Robot(object):
         provided based on common information, including the size of the maze
         the robot is placed in.
         '''
+        Graph.__init__(maze_dim)
         self.location = [0, 0]
         self.heading = 'up'
         self.maze_dim = maze_dim
-        self.goal_loc = [[self.maze_dim/2-1, self.maze_dim/2-1],
-                         [self.maze_dim/2, self.maze_dim/2-1],
-                         [self.maze_dim/2-1, self.maze_dim/2],
-                         [self.maze_dim/2, self.maze_dim/2]]
 
         self.possible_action = dict()
-        self.Q_dict = dict()
         self.move = 0
-        self.build_Q_dict()
-        self.epsilon = 0.1
-
-    def build_Q_dict(self):
-        '''
-        Build the dictionary of the score for every location in the maze in terms of next movement and heading
-        :return: {[row, column]: {[next_heading, next_movement]: score}}
-        '''
-        for row in range(self.maze_dim):
-            for column in range(self.maze_dim):
-                default_score = dict()
-                for heading in ['u', 'l', 'r', 'd']:
-                    for move in [1, 2, 3]:
-                        next_loc = self.update_location(dir_sensors[heading][0], [row, column], move, heading)[1]
-                        goal_dist = abs(next_loc[0] - ((self.maze_dim - 1) / 2)) + abs(
-                            next_loc[1] - ((self.maze_dim - 1) / 2))
-                        dist_reward = self.maze_dim - goal_dist
-                        default_score[(heading, move)] = dist_reward
-                self.Q_dict[(row, column)] = default_score.copy()
 
     @staticmethod
     def update_location(cur_heading, cur_location, movement, heading):
@@ -76,24 +114,6 @@ class Robot(object):
                 movement += 1
 
         return cur_heading, cur_location
-
-    def choose_action(self):
-        if np.random.binomial(1, self.epsilon) == 1:
-            heading = np.random.choice(self.possible_action.keys())
-            movement = np.random.choice(range(self.possible_action[heading]))
-        else:
-            action_dict = self.Q_dict[tuple(self.location)].copy()
-            for key, value in action_dict.items():
-                if key[0] not in self.possible_action.keys() or key[1] > self.possible_action[key[0]]:
-                    del action_dict[key]
-            max_Q_action = []
-            max_Q_value = max(action_dict.values())
-            for key, value in action_dict.items():
-                if value == max_Q_value:
-                    max_Q_action += [key]
-            index = np.random.choice(range(len(max_Q_action)))
-            heading, movement = max_Q_action[index]
-        return heading, movement
 
     def next_pos_move(self, sensors):
         '''
@@ -143,7 +163,6 @@ class Robot(object):
         the maze) then returing the tuple ('Reset', 'Reset') will indicate to
         the tester to end the run and return the robot to the start.
         '''
-        print self.location, self.heading, sensors
         self.next_pos_move(sensors)
         if not self.location in self.goal_loc:
             if sensors.count(0) == 3:
