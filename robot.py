@@ -13,7 +13,10 @@ dir_rotation_heading = {90: [('l', 'u'), ('r', 'd'), ('u', 'r'), ('d', 'l'),
                              ('left', 'u'), ('right', 'd'), ('up', 'r'), ('down', 'l')],
                         -90: [('l', 'd'), ('r', 'u'), ('u', 'l'), ('d', 'r'),
                               ('left', 'd'), ('right', 'u'), ('up', 'l'), ('down', 'r')]}
-
+dir_reverse_rotation = {'r': {'l': 180, 'u': 90, 'd': -90, 'r': 0},
+                        'l': {'r': 180, 'u': -90, 'd': 90, 'l': 0},
+                        'u': {'d': 180, 'r': -90, 'l': 90, 'u': 0},
+                        'd': {'u': 180, 'l': -90, 'r': 90, 'd': 0}}
 
 class Vertex(object):
     def __init__(self, loc, dim):
@@ -32,12 +35,6 @@ class Vertex(object):
     def calculate_key(self, start_vertex):
         self.key[0] = min([self.g, self.rhs]) + self.calculate_dist(start_vertex)
         self.key[1] = min([self.g, self.rhs])
-
-    def del_children(self, children_loc):
-        del self.children[children_loc]
-
-    def del_parent(self, parent_loc):
-        del self.parents[parent_loc]
 
     def calculate_dist(self, start_vertex):
         """Heuristic distance from current vertex to the start vertex"""
@@ -99,11 +96,6 @@ class Graph(object):
             goal_vertex.calculate_key(self.start_vertex)
             heapq.heappush(self.priority_queue, goal_vertex.key + [goal_vertex.loc])
 
-    def _calculate_h(self):
-        for vertex in self.graph.values():
-            vertex.h = max([min(abs(vertex.loc[0]-self.dim/2-1), abs(vertex.loc[0]-self.dim/2)),
-                            min(abs(vertex.loc[1]-self.dim/2-1), abs(vertex.loc[1]-self.dim/2))])
-
     def update_vertex(self, vertex):
         if vertex.loc not in self.goal_loc:
             vertex.rhs = min([self.graph[i].g + vertex.children[i] for i in vertex.children.keys()])
@@ -147,6 +139,7 @@ class Robot(Graph):
         self.maze_dim = maze_dim
 
         self.possible_action = dict()
+        self.action_list = [[self.location, self.heading]]
         self.move = 0
 
     @staticmethod
@@ -185,20 +178,90 @@ class Robot(Graph):
             if wall_distance != 0:
                 self.possible_action[possible_heading] = min(wall_distance, 3)
 
-    def decide_move_n_rotation(self, heading, movement):
-        '''
-        Decide movement and rotation
-        :return:
-        '''
-        if dir_reverse[self.heading] == heading:
-            movement = -movement
-        if (self.heading, heading) in dir_rotation_heading[90]:
-            rotation = 90
-        elif (self.heading, heading) in dir_rotation_heading[-90]:
-            rotation = -90
-        else:
-            rotation = 0
+    # def decide_move_n_rotation(self, heading, movement):
+    #     '''
+    #     Decide movement and rotation
+    #     :return:
+    #     '''
+    #     if dir_reverse[self.heading] == heading:
+    #         movement = -movement
+    #     if (self.heading, heading) in dir_rotation_heading[90]:
+    #         rotation = 90
+    #     elif (self.heading, heading) in dir_rotation_heading[-90]:
+    #         rotation = -90
+    #     else:
+    #         rotation = 0
+    #
+    #     return movement, rotation
 
+    def decide_move_n_rotation(self, next_loc):
+        x, y = self.location
+        next_x, next_y = next_loc
+        if next_x != x:
+            movement = abs(next_x - x)
+            if next_x > x:
+                heading = 'r'
+            else:
+                heading = 'l'
+        else:
+            movement = abs(next_y - y)
+            if next_y > y:
+                heading = 'u'
+            else:
+                heading = 'd'
+        rotation = dir_reverse_rotation[heading][self.heading]
+        if rotation == 180:
+            rotation, movement = 0, -movement
+        return rotation, movement, heading
+
+    def update_obstacle_change(self, current_loc, next_loc):
+        current_vertex = self.graph[current_loc]
+        next_vertex = self.graph[next_loc]
+        current_vertex.children[next_loc] = float("inf")
+        # current_vertex.parent[next_loc] = float("inf")
+        next_vertex.children[next_loc] = float("inf")
+        # next_vertex.parent[next_loc] = float("inf")
+
+    def obstacle_change_vertex(self, sensors):
+        last_loc, last_heading = self.action_list[-2]
+        #dead end
+        if sensors.count(0) == 3:
+            self.update_obstacle_change(tuple(self.location), tuple(last_loc))
+            self.update_vertex(self.graph[tuple(self.location)])
+        else:
+            for idx, possible_heading in enumerate(dir_sensors[self.heading]):
+                wall_distance = sensors[idx]
+                if not wall_distance:
+                    next_loc = self.update_location(self.heading, self.location, 1, possible_heading)[1]
+                    self.update_obstacle_change(tuple(self.location), tuple(next_loc))
+                    self.update_vertex(self.graph[tuple(next_loc)])
+
+    def get_next_loc(self):
+        current_vertex = self.graph[tuple(self.location)]
+        min_cost = min([self.graph[i].g + current_vertex.children[i] for i in current_vertex.children.keys()])
+        for node_loc in current_vertex.children.keys():
+            node = self.graph[node_loc]
+            if node.g + current_vertex.children[node_loc] == min_cost:
+                next_loc = node_loc
+        return next_loc
+
+    def action(self):
+        #dead end
+        if not self.possible_action:
+            movement, rotation, heading = -1, 0, self.heading
+            next_loc = self.action_list[-2][0]
+        else:
+            next_loc = self.get_next_loc()
+            movement, rotation, heading = self.decide_move_n_rotation(next_loc)
+        
+        self.km += self.start_vertex.calculate_dist(self.graph[tuple(next_loc)])
+        self.location, self.heading = next_loc, heading
+        self.start_vertex = self.graph[tuple(self.location)]
+            
+        if not self.possible_action:
+            self.action_list.append([self.location, heading])
+        else:
+            del self.action_list[-1]
         return movement, rotation
 
     def next_move(self, sensors):
@@ -222,15 +285,10 @@ class Robot(Graph):
         the maze) then returing the tuple ('Reset', 'Reset') will indicate to
         the tester to end the run and return the robot to the start.
         '''
-        self.next_pos_move(sensors)
         if not self.location in self.goal_loc:
-            if sensors.count(0) == 3:
-                heading, movement = dir_reverse[self.heading], 1
-            else:
-                heading, movement = self.choose_action()
-            movement, rotation = self.decide_move_n_rotation(heading, movement)
-            self.heading, self.location = self.update_location(self.heading, self.location, movement, heading)
-            print rotation, movement
+            self.next_pos_move(sensors)
+            movement, rotation = self.action()
+
             return rotation, movement
         else:
             return "Reset", "Reset"
