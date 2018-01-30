@@ -1,4 +1,5 @@
 import numpy as np
+import heapq
 # global dictionaries for robot movement and sensing
 dir_sensors = {'u': ['l', 'u', 'r'], 'r': ['u', 'r', 'd'],
                'd': ['r', 'd', 'l'], 'l': ['d', 'l', 'u'],
@@ -13,65 +14,123 @@ dir_rotation_heading = {90: [('l', 'u'), ('r', 'd'), ('u', 'r'), ('d', 'l'),
                         -90: [('l', 'd'), ('r', 'u'), ('u', 'l'), ('d', 'r'),
                               ('left', 'd'), ('right', 'u'), ('up', 'l'), ('down', 'r')]}
 
+
 class Vertex(object):
     def __init__(self, loc, dim):
         """
         :param loc: location in the maze such as (0, 0)
         """
         self.loc = loc
+        self.dim = dim
         self.rhs = float("inf")
         self.g = float("inf")
-        self.h = 0
         self.key = [0, 0]
-        self.parents = []
-        self.children = []
-        self._init_children_parent(dim)
+        self.parents = dict()
+        self.children = dict()
+        self._init_children_parent()
 
-    def calculate_key(self):
-        self.key[0] = min([self.g, self.rhs]) + self.h
+    def calculate_key(self, start_vertex):
+        self.key[0] = min([self.g, self.rhs]) + self.calculate_dist(start_vertex)
         self.key[1] = min([self.g, self.rhs])
 
-    def del_children(self, children_node):
-        del self.children[self.children.index(children_node)]
+    def del_children(self, children_loc):
+        del self.children[children_loc]
 
-    def del_parent(self, parent_node):
-        del self.parents[self.parents.index(parent_node)]
+    def del_parent(self, parent_loc):
+        del self.parents[parent_loc]
 
-    def _init_children_parent(self, dim):
+    def calculate_dist(self, start_vertex):
+        """Heuristic distance from current vertex to the start vertex"""
+        return max([abs(self.loc[0]-start_vertex.loc[0]), abs(self.loc[1]-start_vertex.loc[1])])
+
+    def _init_children_parent(self):
         x, y = self.loc
-        self.add_vertex_loc(x, y, dim, self.children)
-        self.add_vertex_loc(x, y, dim, self.parents)
+        self.add_vertex_loc(x, y, self.dim, self.children)
+        self.add_vertex_loc(x, y, self.dim, self.parents)
 
     @staticmethod
-    def add_vertex_loc(x, y, dim, the_list):
+    def add_vertex_loc(x, y, dim, the_dict, edge_cost=1):
         if x - 1 > 0:
-            the_list.append((x-1, y))
+            the_dict[(x-1, y)] = edge_cost
         if x + 1 < dim - 1:
-            the_list.append((x+1, y))
+            the_dict[(x+1, y)] = edge_cost
         if y - 1 > 0:
-            the_list.append((x, y-1))
+            the_dict[(x, y-1)] = edge_cost
         if y + 1 < dim - 1:
-            the_list.append((x, y+1))
+            the_dict[(x, y+1)] = edge_cost
 
 
 class Graph(object):
     def __init__(self, dim):
         self.dim = dim
         self.graph = {}
+        self.goal_loc = []
+        self._get_goal_loc()
+        self.km = 0
+        self.priority_queue = []
+
         self._init_vertex()
-        self.goal_loc = [[self.dim/2-1, self.dim/2-1],
-                         [self.dim/2, self.dim/2-1],
-                         [self.dim/2-1, self.dim/2],
-                         [self.dim/2, self.dim/2]]
+        self.start_vertex = self.graph[(0, 0)]
+        self._init_D_lite()
+
+    def top_key(self):
+        self.priority_queue.sort()
+        if self.priority_queue:
+            return self.priority_queue[0][:2]
+        else:
+            return [float("inf"), float("inf")]
+
+    def _get_goal_loc(self):
+        left_goal_pos = self.dim/2-1
+        right_goal_pos = self.dim/2
+        self.goal_loc = zip([left_goal_pos]*2 + [right_goal_pos]*2,
+                            [left_goal_pos, right_goal_pos, left_goal_pos, right_goal_pos])
 
     def _init_vertex(self):
-        """
-        :return: list of children list based on the location of the node
-        """
         for x in range(self.dim):
             for y in range(self.dim):
                 node = Vertex((x, y), self.dim)
                 self.graph[(x, y)] = node
+
+    def _init_D_lite(self):
+        for goal_loc in self.goal_loc:
+            goal_vertex = self.graph[goal_loc]
+            goal_vertex.rhs = 0
+            goal_vertex.calculate_key(self.start_vertex)
+            heapq.heappush(self.priority_queue, goal_vertex.key + [goal_vertex.loc])
+
+    def _calculate_h(self):
+        for vertex in self.graph.values():
+            vertex.h = max([min(abs(vertex.loc[0]-self.dim/2-1), abs(vertex.loc[0]-self.dim/2)),
+                            min(abs(vertex.loc[1]-self.dim/2-1), abs(vertex.loc[1]-self.dim/2))])
+
+    def update_vertex(self, vertex):
+        if vertex.loc not in self.goal_loc:
+            vertex.rhs = min([self.graph[i].g + vertex.children[i] for i in vertex.children.keys()])
+        priority_loc = [loc for loc in self.priority_queue if vertex.loc in loc]
+        if priority_loc and len(priority_loc) == 1:
+            self.priority_queue.remove(priority_loc[0])
+        if vertex.g != vertex.rhs:
+            heapq.heappush(self.priority_queue, vertex.calculate_key(self.start_vertex) + [vertex.loc])
+
+    def compute_shortest_path(self):
+        while self.top_key() < self.start_vertex.calculate_key(self.start_vertex) or \
+              self.start_vertex.rhs != self.start_vertex.g:
+            old_key = self.top_key()
+            least_vertex = heapq.heappop(self.priority_queue)
+            if old_key < least_vertex.calculate_key(self.start_vertex):
+                heapq.heappush(self.priority_queue, least_vertex.calculate_key(self.start_vertex) + [least_vertex.loc])
+            elif least_vertex.g > least_vertex.rhs:
+                least_vertex.g = least_vertex.rhs
+                for loc in least_vertex.parents.keys():
+                    parent_vertex = self.graph[loc]
+                    self.update_vertex(parent_vertex)
+            else:
+                least_vertex.g = float("inf")
+                self.update_vertex(least_vertex)
+                for loc in least_vertex.parents.keys():
+                    parent_vertex = self.graph[loc]
+                    self.update_vertex(parent_vertex)
 
 
 class Robot(Graph):
@@ -82,7 +141,7 @@ class Robot(Graph):
         provided based on common information, including the size of the maze
         the robot is placed in.
         '''
-        Graph.__init__(maze_dim)
+        Graph.__init__(self, maze_dim)
         self.location = [0, 0]
         self.heading = 'up'
         self.maze_dim = maze_dim
