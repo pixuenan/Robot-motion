@@ -18,6 +18,7 @@ dir_reverse_rotation = {'r': {'l': 180, 'u': 90, 'd': -90, 'r': 0},
                         'u': {'d': 180, 'r': -90, 'l': 90, 'u': 0},
                         'd': {'u': 180, 'l': -90, 'r': 90, 'd': 0}}
 
+
 class Vertex(object):
     def __init__(self, loc, dim):
         """
@@ -135,7 +136,7 @@ class Robot(Graph):
         '''
         Graph.__init__(self, maze_dim)
         self.location = [0, 0]
-        self.heading = 'up'
+        self.heading = 'u'
         self.maze_dim = maze_dim
 
         self.possible_action = dict()
@@ -147,6 +148,7 @@ class Robot(Graph):
         '''
         Update robot location based on the movement and heading chosen
         '''
+        cur_location = list(cur_location)
         # perform movement
         # keep heading when chose to step back, otherwise change heading
         if dir_reverse[cur_heading] != heading:
@@ -178,22 +180,6 @@ class Robot(Graph):
             if wall_distance != 0:
                 self.possible_action[possible_heading] = min(wall_distance, 3)
 
-    # def decide_move_n_rotation(self, heading, movement):
-    #     '''
-    #     Decide movement and rotation
-    #     :return:
-    #     '''
-    #     if dir_reverse[self.heading] == heading:
-    #         movement = -movement
-    #     if (self.heading, heading) in dir_rotation_heading[90]:
-    #         rotation = 90
-    #     elif (self.heading, heading) in dir_rotation_heading[-90]:
-    #         rotation = -90
-    #     else:
-    #         rotation = 0
-    #
-    #     return movement, rotation
-
     def decide_move_n_rotation(self, next_loc):
         x, y = self.location
         next_x, next_y = next_loc
@@ -218,23 +204,20 @@ class Robot(Graph):
         current_vertex = self.graph[current_loc]
         next_vertex = self.graph[next_loc]
         current_vertex.children[next_loc] = float("inf")
-        # current_vertex.parent[next_loc] = float("inf")
         next_vertex.children[next_loc] = float("inf")
-        # next_vertex.parent[next_loc] = float("inf")
 
     def obstacle_change_vertex(self, sensors):
-        last_loc, last_heading = self.action_list[-2]
+        last_loc, last_heading = self.action_list[-1]
         #dead end
         if sensors.count(0) == 3:
             self.update_obstacle_change(tuple(self.location), tuple(last_loc))
-            self.update_vertex(self.graph[tuple(self.location)])
         else:
             for idx, possible_heading in enumerate(dir_sensors[self.heading]):
                 wall_distance = sensors[idx]
                 if not wall_distance:
                     next_loc = self.update_location(self.heading, self.location, 1, possible_heading)[1]
                     self.update_obstacle_change(tuple(self.location), tuple(next_loc))
-                    self.update_vertex(self.graph[tuple(next_loc)])
+                    self.update_vertex(self.graph[tuple(self.location)])
 
     def get_next_loc(self):
         current_vertex = self.graph[tuple(self.location)]
@@ -245,7 +228,7 @@ class Robot(Graph):
                 next_loc = node_loc
         return next_loc
 
-    def action(self):
+    def action(self, sensors):
         #dead end
         if not self.possible_action:
             movement, rotation, heading = -1, 0, self.heading
@@ -257,7 +240,10 @@ class Robot(Graph):
         self.km += self.start_vertex.calculate_dist(self.graph[tuple(next_loc)])
         self.location, self.heading = next_loc, heading
         self.start_vertex = self.graph[tuple(self.location)]
-            
+        self.obstacle_change_vertex(sensors)
+
+        self.compute_shortest_path()
+
         if not self.possible_action:
             self.action_list.append([self.location, heading])
         else:
@@ -285,9 +271,10 @@ class Robot(Graph):
         the maze) then returing the tuple ('Reset', 'Reset') will indicate to
         the tester to end the run and return the robot to the start.
         '''
+        print self.location
         if not self.location in self.goal_loc:
             self.next_pos_move(sensors)
-            movement, rotation = self.action()
+            movement, rotation = self.action(sensors)
 
             return rotation, movement
         else:
