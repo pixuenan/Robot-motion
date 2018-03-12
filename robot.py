@@ -139,7 +139,7 @@ class Robot(Graph):
         self.heading = 'u'
         self.maze_dim = maze_dim
 
-        self.possible_action = dict()
+        self.possible_action = []
         self.action_list = [[self.location, self.heading]]
         self.move = 0
 
@@ -174,11 +174,12 @@ class Robot(Graph):
         Use this function to determine the possible next move
         :return:
         '''
-        self.possible_action = dict()
+        self.possible_action = []
         for idx, possible_heading in enumerate(dir_sensors[self.heading]):
             wall_distance = sensors[idx]
-            if wall_distance != 0:
-                self.possible_action[possible_heading] = min(wall_distance, 3)
+            if wall_distance:
+                next_loc = self.update_location(self.heading, self.location, 1, possible_heading)[1]
+                self.possible_action.append(next_loc)
 
     def decide_move_n_rotation(self, next_loc):
         x, y = self.location
@@ -198,7 +199,7 @@ class Robot(Graph):
         rotation = dir_reverse_rotation[heading][self.heading]
         if rotation == 180:
             rotation, movement = 0, -movement
-        return rotation, movement, heading
+        return movement, rotation, heading
 
     def update_obstacle_change(self, current_loc, next_loc):
         current_vertex = self.graph[current_loc]
@@ -212,23 +213,26 @@ class Robot(Graph):
         if sensors.count(0) == 3:
             self.update_obstacle_change(tuple(self.location), tuple(last_loc))
         else:
-            for idx, possible_heading in enumerate(dir_sensors[self.heading]):
+            for idx, possible_heading in enumerate(dir_sensors[last_heading]):
                 wall_distance = sensors[idx]
-                if not wall_distance:
-                    next_loc = self.update_location(self.heading, self.location, 1, possible_heading)[1]
-                    self.update_obstacle_change(tuple(self.location), tuple(next_loc))
-                    self.update_vertex(self.graph[tuple(self.location)])
+                if wall_distance:
+                    next_loc = self.update_location(last_heading, last_loc, 1, possible_heading)[1]
+                    self.update_obstacle_change(tuple(last_loc), tuple(next_loc))
+                    self.update_vertex(self.graph[tuple(last_loc)])
 
     def get_next_loc(self):
         current_vertex = self.graph[tuple(self.location)]
-        min_cost = min([self.graph[i].g + current_vertex.children[i] for i in current_vertex.children.keys()])
+        min_cost = min([self.graph[i].g + current_vertex.children[i] for i in current_vertex.children.keys() if list(i) in self.possible_action])
+        print("###", min_cost)
         for node_loc in current_vertex.children.keys():
             node = self.graph[node_loc]
-            if node.g + current_vertex.children[node_loc] == min_cost:
+            if node.g + current_vertex.children[node_loc] == min_cost and list(node_loc) in self.possible_action:
                 next_loc = node_loc
         return next_loc
 
     def action(self, sensors):
+        if self.location == [0, 0]:
+            self.compute_shortest_path()
         #dead end
         if not self.possible_action:
             movement, rotation, heading = -1, 0, self.heading
@@ -244,7 +248,7 @@ class Robot(Graph):
 
         self.compute_shortest_path()
 
-        if not self.possible_action:
+        if self.possible_action:
             self.action_list.append([self.location, heading])
         else:
             del self.action_list[-1]
@@ -275,6 +279,7 @@ class Robot(Graph):
         if not self.location in self.goal_loc:
             self.next_pos_move(sensors)
             movement, rotation = self.action(sensors)
+            print("---", movement, rotation)
 
             return rotation, movement
         else:
